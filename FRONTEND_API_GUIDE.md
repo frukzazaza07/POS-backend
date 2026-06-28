@@ -1,7 +1,26 @@
-# POS Backend — React Frontend Integration Guide
+# POS Backend — Frontend API Guide
 
-Base URL: `http://localhost:4000`  
-All protected endpoints require `Authorization: Bearer <token>` in the request header.
+Base URL: `http://localhost:4000`
+
+All protected endpoints require:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+---
+
+## Response Envelope
+
+Every response uses this wrapper:
+
+```json
+{
+  "status": "success" | "error",
+  "message": "...",
+  "data": { ... }
+}
+```
 
 ---
 
@@ -11,23 +30,24 @@ All protected endpoints require `Authorization: Bearer <token>` in the request h
 2. [Axios Setup](#2-axios-setup)
 3. [Authentication](#3-authentication)
 4. [Products](#4-products)
-5. [Orders](#5-orders)
-6. [Stock](#6-stock)
-7. [Error Handling](#7-error-handling)
-8. [Role-Based Access](#8-role-based-access)
-9. [Quick Reference](#9-quick-reference)
+5. [Orders & Payment Methods](#5-orders--payment-methods)
+6. [Bank QR Config](#6-bank-qr-config)
+7. [Pay Later Management](#7-pay-later-management)
+8. [Stock](#8-stock)
+9. [Role-Based Access](#9-role-based-access)
+10. [Error Handling](#10-error-handling)
+11. [Quick Reference](#11-quick-reference)
 
 ---
 
 ## 1. TypeScript Types
-
-Create `src/types/api.ts` and paste everything below. These mirror the Go models exactly.
 
 ```ts
 // src/types/api.ts
 
 export type UserRole = 'admin' | 'cashier';
 export type OrderStatus = 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
+export type PaymentMethod = 'CASH' | 'BANK_QRCODE' | 'PAY_LATER';
 
 export interface User {
   id: string;
@@ -41,7 +61,7 @@ export interface User {
 
 export interface POSProduct {
   id: string;
-  pos_product_id: string;   // matches Inventory system's pos_product_id
+  pos_product_id: string;
   name: string;
   description: string;
   price: number;
@@ -68,11 +88,27 @@ export interface Order {
   cashier?: User;
   status: OrderStatus;
   total_amount: number;
+  payment_method: PaymentMethod;
   notes: string;
   fail_reason?: string;
   items?: OrderItem[];
+  // Pay Later fields (present only when payment_method === 'PAY_LATER')
+  customer_name?: string;
+  customer_phone?: string;
+  payment_due_date?: string;
+  is_paid?: boolean;
+  paid_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface BankQRConfig {
+  id: string;
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  qr_image_url: string;
+  is_active: boolean;
 }
 
 export interface StockItem {
@@ -87,23 +123,20 @@ export interface StockItem {
   synced_at: string;
 }
 
-export interface AvailabilityDetail {
-  inventory_item_id: string;
-  sku: string;
-  name: string;
-  required: number;
-  available: number;
-  is_sufficient: boolean;
-}
-
 export interface ProductAvailability {
   pos_product_id: string;
   name: string;
   is_available: boolean;
-  details: AvailabilityDetail[];
+  details: Array<{
+    inventory_item_id: string;
+    sku: string;
+    name: string;
+    required: number;
+    available: number;
+    is_sufficient: boolean;
+  }>;
 }
 
-// Generic API response wrappers
 export interface ApiResponse<T> {
   status: 'success' | 'error';
   message?: string;
@@ -122,10 +155,6 @@ export interface PaginatedResponse<T> {
 
 ## 2. Axios Setup
 
-Install axios: `npm install axios`
-
-Create `src/lib/api.ts`:
-
 ```ts
 // src/lib/api.ts
 import axios from 'axios';
@@ -135,16 +164,12 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach JWT token to every request automatically
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('pos_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// Redirect to login on 401
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -160,7 +185,7 @@ api.interceptors.response.use(
 export default api;
 ```
 
-Add to `.env.local`:
+`.env.local`:
 ```
 VITE_API_URL=http://localhost:4000
 ```
@@ -169,67 +194,31 @@ VITE_API_URL=http://localhost:4000
 
 ## 3. Authentication
 
-### 3.1 Login
-
-**Endpoint:** `POST /auth/login`  
-**Auth:** None (public)
-
-**Request body:**
+### Login
+```
+POST /auth/login
+```
 ```json
 {
   "email": "admin@pos.local",
   "password": "admin123"
 }
 ```
-
-**Response:**
+**Response `data`:**
 ```json
 {
-  "status": "success",
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
-    "user": {
-      "id": "uuid",
-      "name": "Admin",
-      "email": "admin@pos.local",
-      "role": "admin",
-      "is_active": true,
-      "created_at": "2026-06-28T00:00:00Z",
-      "updated_at": "2026-06-28T00:00:00Z"
-    }
-  }
+  "token": "<jwt>",
+  "user": { "id": "uuid", "name": "Admin", "email": "admin@pos.local", "role": "admin" }
 }
 ```
 
-**React code:**
 ```ts
 // src/services/auth.ts
-import api from '../lib/api';
-import type { User, ApiResponse } from '../types/api';
-
-interface LoginResponse {
-  token: string;
-  user: User;
-}
-
-export async function login(email: string, password: string): Promise<LoginResponse> {
-  const { data } = await api.post<ApiResponse<LoginResponse>>('/auth/login', {
-    email,
-    password,
-  });
-  const result = data.data!;
-
-  // Persist token and user
-  localStorage.setItem('pos_token', result.token);
-  localStorage.setItem('pos_user', JSON.stringify(result.user));
-
-  return result;
-}
-
-export function logout() {
-  localStorage.removeItem('pos_token');
-  localStorage.removeItem('pos_user');
-  window.location.href = '/login';
+export async function login(email: string, password: string) {
+  const { data } = await api.post<ApiResponse<{ token: string; user: User }>>('/auth/login', { email, password });
+  localStorage.setItem('pos_token', data.data!.token);
+  localStorage.setItem('pos_user', JSON.stringify(data.data!.user));
+  return data.data!;
 }
 
 export function getCurrentUser(): User | null {
@@ -237,73 +226,23 @@ export function getCurrentUser(): User | null {
   return raw ? JSON.parse(raw) : null;
 }
 
-export function isAuthenticated(): boolean {
-  return !!localStorage.getItem('pos_token');
+export function logout() {
+  localStorage.removeItem('pos_token');
+  localStorage.removeItem('pos_user');
+  window.location.href = '/login';
 }
 ```
 
-**Login form example:**
-```tsx
-// src/pages/Login.tsx
-import { useState } from 'react';
-import { login } from '../services/auth';
-
-export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await login(email, password);
-      window.location.href = '/';
-    } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Login failed');
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <button type="submit">Login</button>
-    </form>
-  );
-}
+### Register User *(admin only)*
 ```
-
----
-
-### 3.2 Register New User (admin only)
-
-**Endpoint:** `POST /api/v1/users/register`  
-**Auth:** JWT — admin only
-
-**Request body:**
+POST /api/v1/users/register
+```
 ```json
 {
-  "name": "Jane Doe",
+  "name": "Jane",
   "email": "jane@pos.local",
-  "password": "securepass",
+  "password": "secret123",
   "role": "cashier"
-}
-```
-
-`role` can be `"admin"` or `"cashier"` (defaults to `"cashier"` if omitted).
-
-**React code:**
-```ts
-export async function registerUser(payload: {
-  name: string;
-  email: string;
-  password: string;
-  role?: 'admin' | 'cashier';
-}): Promise<User> {
-  const { data } = await api.post<ApiResponse<User>>('/api/v1/users/register', payload);
-  return data.data!;
 }
 ```
 
@@ -311,297 +250,168 @@ export async function registerUser(payload: {
 
 ## 4. Products
 
-### 4.1 List Products
+| Method | Path | Role |
+|---|---|---|
+| `GET` | `/api/v1/products?page=1&limit=20` | any |
+| `GET` | `/api/v1/products/:id` | any |
+| `POST` | `/api/v1/products` | admin |
+| `PUT` | `/api/v1/products/:id` | admin |
+| `DELETE` | `/api/v1/products/:id` | admin |
 
-**Endpoint:** `GET /api/v1/products`  
-**Auth:** JWT (any role)  
-**Query params:** `search`, `page` (default 1), `limit` (default 20)
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "items": [
-      {
-        "id": "uuid",
-        "pos_product_id": "pos-latte",
-        "name": "Cafe Latte",
-        "description": "Espresso with steamed milk",
-        "price": 65.00,
-        "category": "beverages",
-        "is_active": true,
-        "created_at": "2026-06-28T00:00:00Z",
-        "updated_at": "2026-06-28T00:00:00Z"
-      }
-    ],
-    "total": 1,
-    "page": 1,
-    "limit": 20
-  }
-}
-```
-
-**React code:**
-```ts
-// src/services/products.ts
-import api from '../lib/api';
-import type { ApiResponse, PaginatedResponse, POSProduct } from '../types/api';
-
-export async function getProducts(params?: {
-  search?: string;
-  page?: number;
-  limit?: number;
-}): Promise<PaginatedResponse<POSProduct>> {
-  const { data } = await api.get<ApiResponse<PaginatedResponse<POSProduct>>>(
-    '/api/v1/products',
-    { params }
-  );
-  return data.data!;
-}
-```
-
-**Hook example:**
-```tsx
-// src/hooks/useProducts.ts
-import { useEffect, useState } from 'react';
-import { getProducts } from '../services/products';
-import type { POSProduct } from '../types/api';
-
-export function useProducts(search = '', page = 1) {
-  const [products, setProducts] = useState<POSProduct[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    setLoading(true);
-    getProducts({ search, page, limit: 20 })
-      .then((res) => {
-        setProducts(res.items);
-        setTotal(res.total);
-      })
-      .catch((err) => setError(err.response?.data?.message ?? 'Failed to load'))
-      .finally(() => setLoading(false));
-  }, [search, page]);
-
-  return { products, total, loading, error };
-}
-```
-
----
-
-### 4.2 Get Single Product
-
-**Endpoint:** `GET /api/v1/products/:id`  
-**Auth:** JWT
-
-```ts
-export async function getProduct(id: string): Promise<POSProduct> {
-  const { data } = await api.get<ApiResponse<POSProduct>>(`/api/v1/products/${id}`);
-  return data.data!;
-}
-```
-
----
-
-### 4.3 Create Product (admin only)
-
-**Endpoint:** `POST /api/v1/products`  
-**Auth:** JWT — admin only
-
-**Request body:**
+**Create/Update body:**
 ```json
 {
   "pos_product_id": "pos-latte",
   "name": "Cafe Latte",
   "description": "Espresso with steamed milk",
   "price": 65.00,
-  "category": "beverages",
+  "category": "drinks",
   "is_active": true
 }
 ```
-
-> `pos_product_id` **must match** the `pos_product_id` you registered in the Inventory system for stock deduction to work.
+> `pos_product_id` must match the ID registered in the Inventory system.
 
 ```ts
-export async function createProduct(payload: {
-  pos_product_id: string;
-  name: string;
-  description?: string;
-  price: number;
-  category?: string;
-  is_active?: boolean;
-}): Promise<POSProduct> {
-  const { data } = await api.post<ApiResponse<POSProduct>>('/api/v1/products', payload);
-  return data.data!;
-}
+// src/services/products.ts
+export const getProducts = (params?: { page?: number; limit?: number }) =>
+  api.get<ApiResponse<PaginatedResponse<POSProduct>>>('/api/v1/products', { params })
+    .then(r => r.data.data!);
+
+export const createProduct = (body: Partial<POSProduct>) =>
+  api.post<ApiResponse<POSProduct>>('/api/v1/products', body).then(r => r.data.data!);
+
+export const updateProduct = (id: string, body: Partial<POSProduct>) =>
+  api.put<ApiResponse<POSProduct>>(`/api/v1/products/${id}`, body).then(r => r.data.data!);
+
+export const deleteProduct = (id: string) =>
+  api.delete(`/api/v1/products/${id}`);
 ```
 
 ---
 
-### 4.4 Update Product (admin only)
+## 5. Orders & Payment Methods
 
-**Endpoint:** `PUT /api/v1/products/:id`  
-**Auth:** JWT — admin only
+### Payment Method Options
 
-```ts
-export async function updateProduct(
-  id: string,
-  payload: Partial<{
-    name: string;
-    description: string;
-    price: number;
-    category: string;
-    is_active: boolean;
-  }>
-): Promise<POSProduct> {
-  const { data } = await api.put<ApiResponse<POSProduct>>(
-    `/api/v1/products/${id}`,
-    payload
-  );
-  return data.data!;
-}
-```
+| Value | When to use |
+|---|---|
+| `CASH` | Customer pays with cash at counter (default) |
+| `BANK_QRCODE` | Customer scans store QR code and transfers |
+| `PAY_LATER` | Customer pays later — saves name, phone, due date |
 
 ---
 
-### 4.5 Delete Product (admin only)
-
-**Endpoint:** `DELETE /api/v1/products/:id`  
-**Auth:** JWT — admin only
-
-```ts
-export async function deleteProduct(id: string): Promise<void> {
-  await api.delete(`/api/v1/products/${id}`);
-}
+### Create Order
+```
+POST /api/v1/orders
 ```
 
----
-
-## 5. Orders
-
-### 5.1 Create Order (process a sale)
-
-**Endpoint:** `POST /api/v1/orders`  
-**Auth:** JWT (any role)
-
-**Request body:**
+**CASH (default — `payment_method` can be omitted):**
 ```json
 {
-  "notes": "Table 5, extra sugar",
+  "payment_method": "CASH",
+  "notes": "Table 3",
   "items": [
-    { "pos_product_id": "pos-latte",     "quantity": 2 },
-    { "pos_product_id": "pos-americano", "quantity": 1 }
+    { "pos_product_id": "pos-latte", "quantity": 2 }
   ]
 }
 ```
 
-**Response — success (`HTTP 201`):**
+**BANK_QRCODE:**
 ```json
 {
-  "status": "success",
-  "data": {
-    "id": "uuid",
-    "pos_order_id": "ORDER-20260628-A1B2C3D4",
-    "cashier_id": "uuid",
-    "status": "COMPLETED",
-    "total_amount": 195.00,
-    "notes": "Table 5, extra sugar",
-    "items": [
-      {
-        "id": "uuid",
-        "order_id": "uuid",
-        "pos_product_id": "pos-latte",
-        "product_name": "Cafe Latte",
-        "quantity": 2,
-        "unit_price": 65.00,
-        "subtotal": 130.00
-      },
-      {
-        "id": "uuid",
-        "order_id": "uuid",
-        "pos_product_id": "pos-americano",
-        "product_name": "Americano",
-        "quantity": 1,
-        "unit_price": 65.00,
-        "subtotal": 65.00
-      }
-    ],
-    "created_at": "2026-06-28T10:00:00Z",
-    "updated_at": "2026-06-28T10:00:00Z"
-  }
+  "payment_method": "BANK_QRCODE",
+  "notes": "",
+  "items": [
+    { "pos_product_id": "pos-americano", "quantity": 1 }
+  ]
+}
+```
+After creating, call `GET /api/v1/config/bank-qr` to show the store's bank account / QR image to the customer.
+
+**PAY_LATER:**
+```json
+{
+  "payment_method": "PAY_LATER",
+  "customer_name": "John Doe",
+  "customer_phone": "0812345678",
+  "payment_due_days": 7,
+  "notes": "regular customer",
+  "items": [
+    { "pos_product_id": "pos-latte", "quantity": 3 }
+  ]
+}
+```
+- `customer_name` — **required**
+- `customer_phone` — **required**
+- `payment_due_days` — days until due (default **7** if omitted)
+
+**Response `data` (HTTP 201):**
+```json
+{
+  "id": "uuid",
+  "pos_order_id": "ORDER-20260628-ABCD1234",
+  "status": "COMPLETED",
+  "total_amount": 195.00,
+  "payment_method": "PAY_LATER",
+  "customer_name": "John Doe",
+  "customer_phone": "0812345678",
+  "payment_due_date": "2026-07-05T10:00:00+07:00",
+  "is_paid": false,
+  "paid_at": null,
+  "items": [ ... ]
 }
 ```
 
-**Response — stock insufficient (`HTTP 400`):**
-```json
-{
-  "status": "error",
-  "message": "stock deduction failed: insufficient stock for RAW-COFFEE: have 10.00, need 18.00"
-}
-```
-
-**Order status values:**
-
-| Status | Meaning |
-|---|---|
-| `PENDING` | Created, awaiting inventory deduction |
-| `COMPLETED` | Stock deducted successfully — sale done |
-| `FAILED` | Inventory deduction failed (see `fail_reason`) |
-| `CANCELLED` | Manually cancelled before processing |
-
-**React code:**
 ```ts
 // src/services/orders.ts
-import api from '../lib/api';
-import type { ApiResponse, Order } from '../types/api';
-
-export interface CreateOrderPayload {
+export type CreateOrderPayload = {
+  payment_method?: PaymentMethod;
   notes?: string;
-  items: Array<{
-    pos_product_id: string;
-    quantity: number;
-  }>;
-}
+  items: Array<{ pos_product_id: string; quantity: number }>;
+  // PAY_LATER only
+  customer_name?: string;
+  customer_phone?: string;
+  payment_due_days?: number;
+};
 
-export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
-  const { data } = await api.post<ApiResponse<Order>>('/api/v1/orders', payload);
-  return data.data!;
-}
+export const createOrder = (payload: CreateOrderPayload): Promise<Order> =>
+  api.post<ApiResponse<Order>>('/api/v1/orders', payload).then(r => r.data.data!);
 ```
 
-**Checkout component example:**
+**Checkout component with payment method selection:**
 ```tsx
 // src/components/Checkout.tsx
 import { useState } from 'react';
 import { createOrder } from '../services/orders';
-import type { POSProduct } from '../types/api';
+import type { PaymentMethod } from '../types/api';
 
-interface CartItem {
-  product: POSProduct;
-  quantity: number;
-}
-
-export default function Checkout({ cart }: { cart: CartItem[] }) {
+export default function Checkout({ cart }: { cart: Array<{ pos_product_id: string; price: number; quantity: number }> }) {
+  const [method, setMethod] = useState<PaymentMethod>('CASH');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [dueDays, setDueDays] = useState(7);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const total = cart.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
+  const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
 
   const handleCheckout = async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const order = await createOrder({
+        payment_method: method,
         notes,
-        items: cart.map((i) => ({
-          pos_product_id: i.product.pos_product_id,
-          quantity: i.quantity,
-        })),
+        items: cart.map(i => ({ pos_product_id: i.pos_product_id, quantity: i.quantity })),
+        ...(method === 'PAY_LATER' && { customer_name: customerName, customer_phone: customerPhone, payment_due_days: dueDays }),
       });
-      alert(`Order ${order.pos_order_id} completed! Total: ฿${order.total_amount}`);
+      if (method === 'BANK_QRCODE') {
+        // Redirect or show bank QR screen
+        window.location.href = `/order/${order.id}/bank-qr`;
+      } else {
+        alert(`Order ${order.pos_order_id} done! ฿${order.total_amount}`);
+      }
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Checkout failed');
     } finally {
@@ -612,7 +422,25 @@ export default function Checkout({ cart }: { cart: CartItem[] }) {
   return (
     <div>
       <p>Total: ฿{total.toFixed(2)}</p>
-      <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
+
+      {/* Payment method selector */}
+      <select value={method} onChange={e => setMethod(e.target.value as PaymentMethod)}>
+        <option value="CASH">Cash</option>
+        <option value="BANK_QRCODE">Bank QR Code</option>
+        <option value="PAY_LATER">Pay Later</option>
+      </select>
+
+      {/* PAY_LATER extra fields */}
+      {method === 'PAY_LATER' && (
+        <div>
+          <input placeholder="Customer name *" value={customerName} onChange={e => setCustomerName(e.target.value)} />
+          <input placeholder="Phone *" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+          <input type="number" placeholder="Due days (default 7)" value={dueDays}
+            onChange={e => setDueDays(Number(e.target.value))} min={1} />
+        </div>
+      )}
+
+      <input placeholder="Notes" value={notes} onChange={e => setNotes(e.target.value)} />
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <button onClick={handleCheckout} disabled={loading || cart.length === 0}>
         {loading ? 'Processing...' : 'Confirm Sale'}
@@ -624,305 +452,372 @@ export default function Checkout({ cart }: { cart: CartItem[] }) {
 
 ---
 
-### 5.2 List Orders
-
-**Endpoint:** `GET /api/v1/orders`  
-**Auth:** JWT  
-**Query params:** `page` (default 1), `limit` (default 20)
-
-> Cashiers see only their own orders. Admins see all orders.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "items": [ /* Order[] */ ],
-    "total": 42,
-    "page": 1,
-    "limit": 20
-  }
-}
+### List Orders
+```
+GET /api/v1/orders
 ```
 
+**Query parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `page` | int | Page number (default 1) |
+| `limit` | int | Items per page (default 20, max 100) |
+| `payment_method` | string | Filter: `CASH`, `BANK_QRCODE`, `PAY_LATER` |
+| `status` | string | Filter: `PENDING`, `COMPLETED`, `CANCELLED`, `FAILED` |
+| `overdue` | bool | `true` = only overdue unpaid PAY_LATER orders |
+
+> Cashiers see only their own orders. Admins see all.
+
 ```ts
-export async function getOrders(params?: {
+export type OrderListParams = {
   page?: number;
   limit?: number;
-}): Promise<PaginatedResponse<Order>> {
-  const { data } = await api.get<ApiResponse<PaginatedResponse<Order>>>(
-    '/api/v1/orders',
-    { params }
+  payment_method?: PaymentMethod;
+  status?: OrderStatus;
+  overdue?: boolean;
+};
+
+export const getOrders = (params?: OrderListParams): Promise<PaginatedResponse<Order>> =>
+  api.get<ApiResponse<PaginatedResponse<Order>>>('/api/v1/orders', { params }).then(r => r.data.data!);
+```
+
+---
+
+### Get Order
+```
+GET /api/v1/orders/:id
+```
+
+### Cancel Order
+```
+POST /api/v1/orders/:id/cancel
+```
+Only `PENDING` orders. Cashiers can cancel their own; admins can cancel any.
+
+---
+
+## 6. Bank QR Config
+
+Used when `payment_method = "BANK_QRCODE"`. The admin sets the store's bank details once; the cashier screen shows the QR to the customer after order creation.
+
+### Get Current Config
+```
+GET /api/v1/config/bank-qr
+```
+Returns `404` if not yet configured.
+
+**Response `data`:**
+```json
+{
+  "id": "uuid",
+  "bank_name": "SCB",
+  "account_name": "My Coffee Shop Co.",
+  "account_number": "111-2-34567-8",
+  "qr_image_url": "https://example.com/store-qr.png",
+  "is_active": true
+}
+```
+
+### Generate PromptPay QR Code Image
+```
+GET /api/v1/config/bank-qr/qrcode
+GET /api/v1/config/bank-qr/qrcode?amount=185.00
+```
+Returns a **PNG image** (`image/png`) directly — use as `<img src="..." />`.
+
+- No `?amount` → static QR (show once, any amount)
+- `?amount=185.00` → dynamic QR with the exact amount embedded (Thai bank apps display it pre-filled)
+
+Requires `promptpay_id` to be set in the config (see PUT below).
+
+```tsx
+// Show QR for a specific order amount
+const token = localStorage.getItem('pos_token');
+const qrSrc = `http://localhost:4000/api/v1/config/bank-qr/qrcode?amount=${order.total_amount}`;
+
+// In JSX — add token via query param or proxy; or fetch as blob:
+const [qrUrl, setQrUrl] = useState('');
+useEffect(() => {
+  fetch(qrSrc, { headers: { Authorization: `Bearer ${token}` } })
+    .then(r => r.blob())
+    .then(b => setQrUrl(URL.createObjectURL(b)));
+}, [order.total_amount]);
+
+return <img src={qrUrl} alt="PromptPay QR" style={{ width: 240 }} />;
+```
+
+---
+
+### Set / Update Config *(admin only)*
+```
+PUT /api/v1/config/bank-qr
+```
+```json
+{
+  "bank_name": "SCB",
+  "account_name": "My Coffee Shop Co.",
+  "account_number": "111-2-34567-8",
+  "promptpay_id": "0812345678",
+  "qr_image_url": "https://example.com/store-qr.png"
+}
+```
+- `bank_name`, `account_name`, `account_number` — **required**
+- `promptpay_id` — phone number (10 digits, e.g. `0812345678`) or national/tax ID (13 digits); **required for QR generation**
+- `qr_image_url` — optional static image URL (use QR generation endpoint instead)
+
+```ts
+// src/services/config.ts
+import api from '../lib/api';
+import type { ApiResponse, BankQRConfig } from '../types/api';
+
+export const getBankQRConfig = (): Promise<BankQRConfig> =>
+  api.get<ApiResponse<BankQRConfig>>('/api/v1/config/bank-qr').then(r => r.data.data!);
+
+export const setBankQRConfig = (body: Omit<BankQRConfig, 'id' | 'is_active'>): Promise<BankQRConfig> =>
+  api.put<ApiResponse<BankQRConfig>>('/api/v1/config/bank-qr', body).then(r => r.data.data!);
+```
+
+**Bank QR display screen:**
+```tsx
+// src/pages/BankQRScreen.tsx
+import { useEffect, useState } from 'react';
+import { getBankQRConfig } from '../services/config';
+import type { BankQRConfig, Order } from '../types/api';
+
+export default function BankQRScreen({ order }: { order: Order }) {
+  const [config, setConfig] = useState<BankQRConfig | null>(null);
+
+  useEffect(() => { getBankQRConfig().then(setConfig).catch(() => {}); }, []);
+
+  if (!config) return <p>Bank QR not configured. Ask admin to set it up.</p>;
+
+  return (
+    <div>
+      <h2>Scan to Pay</h2>
+      {config.qr_image_url && <img src={config.qr_image_url} alt="Bank QR Code" style={{ width: 240 }} />}
+      <p><strong>Bank:</strong> {config.bank_name}</p>
+      <p><strong>Account:</strong> {config.account_name}</p>
+      <p><strong>Number:</strong> {config.account_number}</p>
+      <p><strong>Amount:</strong> ฿{order.total_amount.toFixed(2)}</p>
+      <p style={{ color: '#888', fontSize: 12 }}>Order: {order.pos_order_id}</p>
+    </div>
   );
-  return data.data!;
+}
+```
+
+**Admin config form:**
+```tsx
+// src/pages/admin/BankQRConfigPage.tsx
+import { useEffect, useState } from 'react';
+import { getBankQRConfig, setBankQRConfig } from '../services/config';
+
+export default function BankQRConfigPage() {
+  const [form, setForm] = useState({ bank_name: '', account_name: '', account_number: '', qr_image_url: '' });
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    getBankQRConfig().then(c => setForm({ bank_name: c.bank_name, account_name: c.account_name, account_number: c.account_number, qr_image_url: c.qr_image_url })).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    await setBankQRConfig(form);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div>
+      <h2>Bank QR Config</h2>
+      <input placeholder="Bank name (e.g. SCB)" value={form.bank_name} onChange={e => setForm({ ...form, bank_name: e.target.value })} />
+      <input placeholder="Account name" value={form.account_name} onChange={e => setForm({ ...form, account_name: e.target.value })} />
+      <input placeholder="Account number" value={form.account_number} onChange={e => setForm({ ...form, account_number: e.target.value })} />
+      <input placeholder="QR image URL (optional)" value={form.qr_image_url} onChange={e => setForm({ ...form, qr_image_url: e.target.value })} />
+      <button onClick={handleSave}>Save</button>
+      {saved && <span style={{ color: 'green' }}> Saved!</span>}
+    </div>
+  );
 }
 ```
 
 ---
 
-### 5.3 Get Single Order
+## 7. Pay Later Management
 
-**Endpoint:** `GET /api/v1/orders/:id`  
-**Auth:** JWT
+### How it works
 
-```ts
-export async function getOrder(id: string): Promise<Order> {
-  const { data } = await api.get<ApiResponse<Order>>(`/api/v1/orders/${id}`);
-  return data.data!;
-}
+1. Cashier creates order with `payment_method: "PAY_LATER"` + customer info
+2. Stock is deducted immediately (goods leave)
+3. Backend sends overdue alerts every **1 hour** while `is_paid = false` and `payment_due_date` has passed
+4. When customer pays, admin calls **Mark as Paid**
+
+### View Overdue PAY_LATER Orders *(admin)*
+```
+GET /api/v1/orders?payment_method=PAY_LATER&overdue=true
 ```
 
----
+### View All PAY_LATER Orders
+```
+GET /api/v1/orders?payment_method=PAY_LATER
+```
 
-### 5.4 Cancel Order
+### Mark as Paid *(admin only)*
+```
+POST /api/v1/orders/:id/pay
+```
+Sets `is_paid = true` and records `paid_at`. Stops future alerts.
 
-**Endpoint:** `POST /api/v1/orders/:id/cancel`  
-**Auth:** JWT  
-**Rules:** Only `PENDING` orders can be cancelled. Cashiers can only cancel their own orders; admins can cancel any.
-
-**Response:**
+**Response `data`:**
 ```json
 {
-  "status": "success",
-  "data": { "message": "order cancelled" }
+  "message": "marked as paid",
+  "order": { "id": "...", "is_paid": true, "paid_at": "2026-07-03T09:00:00+07:00", ... }
 }
 ```
 
 ```ts
-export async function cancelOrder(id: string): Promise<void> {
-  await api.post(`/api/v1/orders/${id}/cancel`);
+// src/services/orders.ts (add to existing)
+export const markOrderPaid = (id: string): Promise<{ message: string; order: Order }> =>
+  api.post<ApiResponse<{ message: string; order: Order }>>(`/api/v1/orders/${id}/pay`).then(r => r.data.data!);
+```
+
+**Pay Later dashboard:**
+```tsx
+// src/pages/admin/PayLaterDashboard.tsx
+import { useEffect, useState } from 'react';
+import { getOrders, markOrderPaid } from '../services/orders';
+import type { Order } from '../types/api';
+
+export default function PayLaterDashboard() {
+  const [overdueOrders, setOverdueOrders] = useState<Order[]>([]);
+
+  const load = () =>
+    getOrders({ payment_method: 'PAY_LATER', overdue: true, limit: 100 })
+      .then(r => setOverdueOrders(r.items));
+
+  useEffect(() => { load(); }, []);
+
+  const handlePay = async (id: string) => {
+    await markOrderPaid(id);
+    load();
+  };
+
+  return (
+    <div>
+      <h2>Overdue Pay-Later Orders ({overdueOrders.length})</h2>
+      {overdueOrders.length === 0 && <p>No overdue orders.</p>}
+      {overdueOrders.map(o => (
+        <div key={o.id} style={{ border: '1px solid red', padding: 12, marginBottom: 8 }}>
+          <p><strong>{o.pos_order_id}</strong> — ฿{o.total_amount.toFixed(2)}</p>
+          <p>Customer: {o.customer_name} ({o.customer_phone})</p>
+          <p>Due: {o.payment_due_date ? new Date(o.payment_due_date).toLocaleDateString() : '-'}</p>
+          <button onClick={() => handlePay(o.id)}>Mark as Paid</button>
+        </div>
+      ))}
+    </div>
+  );
 }
 ```
 
----
+### Overdue Alert Webhook
 
-## 6. Stock
+Set `ALERT_WEBHOOK_URL` in `.env` to receive a POST every hour for each overdue order:
 
-### 6.1 Get Cached Stock Levels
-
-**Endpoint:** `GET /api/v1/stock`  
-**Auth:** JWT  
-
-Returns the local cache — fast, no network call to Inventory. Updated on app startup, every 5 minutes, and via webhook events.
-
-**Response:**
 ```json
 {
-  "status": "success",
-  "data": [
-    {
-      "inventory_item_id": "inv-coffee-beans-001",
-      "sku": "RAW-COFFEE-BEANS",
-      "name": "Coffee Beans (Arabica)",
-      "unit": "g",
-      "quantity_in_stock": 4946.0,
-      "min_quantity": 500.0,
-      "is_low": false,
-      "is_out": false,
-      "synced_at": "2026-06-28T10:00:00Z"
-    }
-  ]
+  "event": "PAY_LATER_OVERDUE",
+  "order_id": "uuid",
+  "pos_order_id": "ORDER-20260628-ABCD1234",
+  "customer_name": "John Doe",
+  "customer_phone": "0812345678",
+  "total_amount": 195.00,
+  "payment_due_date": "2026-07-05T10:00:00Z",
+  "days_overdue": 3
 }
+```
+Connect this to LINE Notify, Discord webhook, or any HTTP endpoint.
+
+---
+
+## 8. Stock
+
+### Get Cached Stock (fast)
+```
+GET /api/v1/stock
+```
+Returns local cache — no round-trip to Inventory. Updated on startup, every 5 min, and via Inventory webhooks.
+
+### Check Real-time Availability
+```
+GET /api/v1/stock/availability/:pos_product_id?quantity=2
+```
+
+### Force Re-sync *(admin only)*
+```
+POST /api/v1/stock/sync
 ```
 
 ```ts
 // src/services/stock.ts
-import api from '../lib/api';
-import type { ApiResponse, StockItem, ProductAvailability } from '../types/api';
+export const getStock = () =>
+  api.get<ApiResponse<StockItem[]>>('/api/v1/stock').then(r => r.data.data!);
 
-export async function getStock(): Promise<StockItem[]> {
-  const { data } = await api.get<ApiResponse<StockItem[]>>('/api/v1/stock');
-  return data.data!;
-}
+export const checkAvailability = (posProductId: string, quantity = 1) =>
+  api.get<ApiResponse<ProductAvailability>>(`/api/v1/stock/availability/${posProductId}`, { params: { quantity } })
+    .then(r => r.data.data!);
+
+export const syncStock = () =>
+  api.post<ApiResponse<{ message: string; count: number }>>('/api/v1/stock/sync').then(r => r.data.data!);
 ```
 
-**Stock indicator component:**
+---
+
+## 9. Role-Based Access
+
+```ts
+export const isAdmin = () => getCurrentUser()?.role === 'admin';
+```
+
 ```tsx
-// src/components/StockBadge.tsx
-import type { StockItem } from '../types/api';
-
-export function StockBadge({ item }: { item: StockItem }) {
-  if (item.is_out) return <span style={{ color: 'red' }}>Out of Stock</span>;
-  if (item.is_low) return <span style={{ color: 'orange' }}>Low Stock</span>;
-  return <span style={{ color: 'green' }}>In Stock</span>;
-}
+{isAdmin() && <button onClick={() => syncStock()}>Sync Stock</button>}
+{isAdmin() && <Link to="/admin/pay-later">Pay Later Dashboard</Link>}
+{isAdmin() && <Link to="/admin/bank-qr">Bank QR Config</Link>}
 ```
 
 ---
 
-### 6.2 Check Real-Time Availability
-
-**Endpoint:** `GET /api/v1/stock/availability/:pos_product_id`  
-**Auth:** JWT  
-**Query params:** `quantity` (default 1)
-
-Use this before showing a product as available in the order screen.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "pos_product_id": "pos-latte",
-    "name": "Cafe Latte",
-    "is_available": true,
-    "details": [
-      {
-        "inventory_item_id": "inv-coffee-beans-001",
-        "sku": "RAW-COFFEE-BEANS",
-        "name": "Coffee Beans",
-        "required": 36,
-        "available": 4946,
-        "is_sufficient": true
-      }
-    ]
-  }
-}
-```
-
-```ts
-export async function checkAvailability(
-  posProductId: string,
-  quantity = 1
-): Promise<ProductAvailability> {
-  const { data } = await api.get<ApiResponse<ProductAvailability>>(
-    `/api/v1/stock/availability/${posProductId}`,
-    { params: { quantity } }
-  );
-  return data.data!;
-}
-```
-
----
-
-### 6.3 Force Stock Sync (admin only)
-
-**Endpoint:** `POST /api/v1/stock/sync`  
-**Auth:** JWT — admin only
-
-Triggers an immediate full sync from the Inventory system.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": { "message": "sync complete", "count": 12 }
-}
-```
-
-```ts
-export async function syncStock(): Promise<{ message: string; count: number }> {
-  const { data } = await api.post<ApiResponse<{ message: string; count: number }>>(
-    '/api/v1/stock/sync'
-  );
-  return data.data!;
-}
-```
-
----
-
-## 7. Error Handling
-
-Every error response has the same shape:
-
-```json
-{
-  "status": "error",
-  "message": "description of what went wrong"
-}
-```
-
-| HTTP Status | Meaning |
-|---|---|
-| `400` | Bad request — validation failed or stock insufficient |
-| `401` | Missing or invalid JWT token (redirected to `/login` automatically) |
-| `403` | Admin-only endpoint — cashier attempted access |
-| `404` | Resource not found |
-| `502` | Inventory system unreachable |
-| `500` | Server error |
-
-**Centralised error extraction helper:**
+## 10. Error Handling
 
 ```ts
 // src/lib/errors.ts
 import { AxiosError } from 'axios';
 
 export function getErrorMessage(err: unknown, fallback = 'Something went wrong'): string {
-  if (err instanceof AxiosError) {
-    return err.response?.data?.message ?? fallback;
-  }
+  if (err instanceof AxiosError) return err.response?.data?.message ?? fallback;
   if (err instanceof Error) return err.message;
   return fallback;
 }
 ```
 
-**Usage:**
-```tsx
-import { getErrorMessage } from '../lib/errors';
-
-try {
-  await createOrder(payload);
-} catch (err) {
-  setError(getErrorMessage(err, 'Failed to process order'));
-}
-```
+| HTTP | Meaning |
+|---|---|
+| `400` | Validation error or business rule (see `message`) |
+| `401` | Missing/invalid JWT — auto-redirected to `/login` |
+| `403` | Admin-only action attempted by cashier |
+| `404` | Resource not found |
+| `502` | Inventory system unreachable |
+| `500` | Internal server error |
 
 ---
 
-## 8. Role-Based Access
-
-```ts
-// src/lib/auth.ts
-import { getCurrentUser } from '../services/auth';
-
-export function isAdmin(): boolean {
-  return getCurrentUser()?.role === 'admin';
-}
-```
-
-**Conditional UI rendering:**
-```tsx
-import { isAdmin } from '../lib/auth';
-
-// Only show admin actions
-{isAdmin() && (
-  <button onClick={() => syncStock()}>Sync Stock</button>
-)}
-
-{isAdmin() && (
-  <button onClick={() => deleteProduct(id)}>Delete Product</button>
-)}
-```
-
-**Protected route example (React Router v6):**
-```tsx
-// src/components/AdminRoute.tsx
-import { Navigate, Outlet } from 'react-router-dom';
-import { getCurrentUser } from '../services/auth';
-
-export function AdminRoute() {
-  const user = getCurrentUser();
-  if (!user) return <Navigate to="/login" />;
-  if (user.role !== 'admin') return <Navigate to="/" />;
-  return <Outlet />;
-}
-
-// In router setup:
-// <Route element={<AdminRoute />}>
-//   <Route path="/admin/products" element={<ProductManagement />} />
-//   <Route path="/admin/users" element={<UserManagement />} />
-// </Route>
-```
-
----
-
-## 9. Quick Reference
+## 11. Quick Reference
 
 ### All Endpoints
 
 | Method | Path | Auth | Role |
 |---|---|---|---|
 | `POST` | `/auth/login` | — | public |
+| `GET` | `/health` | — | public |
 | `POST` | `/api/v1/users/register` | JWT | admin |
 | `GET` | `/api/v1/products` | JWT | any |
 | `GET` | `/api/v1/products/:id` | JWT | any |
@@ -933,37 +828,49 @@ export function AdminRoute() {
 | `GET` | `/api/v1/orders` | JWT | any* |
 | `GET` | `/api/v1/orders/:id` | JWT | any |
 | `POST` | `/api/v1/orders/:id/cancel` | JWT | any** |
+| `POST` | `/api/v1/orders/:id/pay` | JWT | admin |
+| `GET` | `/api/v1/config/bank-qr/qrcode?amount=N` | JWT | any |
+| `GET` | `/api/v1/config/bank-qr` | JWT | any |
+| `PUT` | `/api/v1/config/bank-qr` | JWT | admin |
 | `GET` | `/api/v1/stock` | JWT | any |
 | `POST` | `/api/v1/stock/sync` | JWT | admin |
-| `GET` | `/api/v1/stock/availability/:pos_product_id?quantity=N` | JWT | any |
-| `GET` | `/health` | — | public |
+| `GET` | `/api/v1/stock/availability/:id?quantity=N` | JWT | any |
 
-\* Cashiers see only their own orders; admins see all.  
-\*\* Cashiers can cancel only their own PENDING orders; admins can cancel any.
+\* Cashiers see only their own orders.  
+\*\* Cashiers can cancel only their own PENDING orders.
+
+### Order `status` Lifecycle
+
+```
+PENDING → COMPLETED  (stock deducted, sale done)
+        → FAILED     (inventory rejected or unreachable)
+        → CANCELLED  (manually cancelled while PENDING)
+```
+
+### Payment Method Field Guide
+
+| Field | CASH | BANK_QRCODE | PAY_LATER |
+|---|---|---|---|
+| `payment_method` | `"CASH"` | `"BANK_QRCODE"` | `"PAY_LATER"` |
+| `customer_name` | — | — | required |
+| `customer_phone` | — | — | required |
+| `payment_due_days` | — | — | optional (default 7) |
+| `is_paid` | — | — | `false` until `POST /:id/pay` |
+| Show bank QR after order? | no | **yes** | no |
 
 ### `src/services/` file map
 
 ```
 src/
 ├── lib/
-│   ├── api.ts          # axios instance + interceptors
-│   ├── auth.ts         # isAdmin() helper
-│   └── errors.ts       # getErrorMessage()
+│   ├── api.ts        # axios instance + interceptors
+│   └── errors.ts     # getErrorMessage()
 ├── services/
-│   ├── auth.ts         # login, logout, getCurrentUser
-│   ├── products.ts     # getProducts, getProduct, createProduct, updateProduct, deleteProduct
-│   ├── orders.ts       # createOrder, getOrders, getOrder, cancelOrder
-│   └── stock.ts        # getStock, checkAvailability, syncStock
-├── hooks/
-│   └── useProducts.ts  # example data-fetching hook
+│   ├── auth.ts       # login, logout, getCurrentUser
+│   ├── products.ts   # CRUD
+│   ├── orders.ts     # createOrder, getOrders, cancelOrder, markOrderPaid
+│   ├── config.ts     # getBankQRConfig, setBankQRConfig
+│   └── stock.ts      # getStock, checkAvailability, syncStock
 └── types/
-    └── api.ts          # all TypeScript types
+    └── api.ts        # all TypeScript types
 ```
-
-### Token Lifecycle
-
-- Token is valid for **24 hours**
-- Stored in `localStorage` under key `pos_token`
-- Automatically attached to every request via the axios interceptor
-- On `401` response, token is cleared and user is redirected to `/login`
-- No refresh token — user must log in again after expiry

@@ -8,27 +8,25 @@ import (
 )
 
 type Handlers struct {
-	Auth       *handler.AuthHandler
-	Product    *handler.POSProductHandler
-	Order      *handler.OrderHandler
-	Stock      *handler.StockHandler
-	Webhook    *handler.WebhookHandler
+	Auth    *handler.AuthHandler
+	Product *handler.POSProductHandler
+	Order   *handler.OrderHandler
+	Stock   *handler.StockHandler
+	Webhook *handler.WebhookHandler
+	BankQR  *handler.BankQRHandler
 }
 
 func Setup(app *fiber.App, h Handlers) {
-	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
-	// Auth (public)
 	auth := app.Group("/auth")
 	auth.Post("/login", h.Auth.Login)
 
-	// Webhook receiver from Inventory system (public, HMAC-verified internally)
+	// Webhook from Inventory system (public, HMAC-verified internally)
 	app.Post("/webhook/inventory", h.Webhook.InventoryEvent)
 
-	// Protected API
 	api := app.Group("/api/v1", middleware.JWT())
 
 	// Products
@@ -45,6 +43,7 @@ func Setup(app *fiber.App, h Handlers) {
 	orders.Get("/", h.Order.List)
 	orders.Get("/:id", h.Order.Get)
 	orders.Post("/:id/cancel", h.Order.Cancel)
+	orders.Post("/:id/pay", middleware.AdminOnly(), h.Order.MarkPaid)
 
 	// Stock
 	stock := api.Group("/stock")
@@ -52,6 +51,12 @@ func Setup(app *fiber.App, h Handlers) {
 	stock.Post("/sync", middleware.AdminOnly(), h.Stock.SyncStock)
 	stock.Get("/availability/:pos_product_id", h.Stock.CheckAvailability)
 
-	// Admin: register new users
+	// Admin: register users
 	api.Post("/users/register", middleware.AdminOnly(), h.Auth.Register)
+
+	// Config
+	config := api.Group("/config")
+	config.Get("/bank-qr/qrcode", h.BankQR.GetQRCode) // before /bank-qr to avoid prefix clash
+	config.Get("/bank-qr", h.BankQR.Get)
+	config.Put("/bank-qr", middleware.AdminOnly(), h.BankQR.Upsert)
 }

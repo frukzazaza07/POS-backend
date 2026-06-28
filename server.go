@@ -24,7 +24,6 @@ func main() {
 		log.Println("no .env file, reading from environment")
 	}
 
-	// Database
 	db, err := database.Connect()
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
@@ -39,8 +38,9 @@ func main() {
 	productRepo := repository.NewPOSProductRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	stockRepo := repository.NewStockCacheRepository(db)
+	bankQRRepo := repository.NewBankQRConfigRepository(db)
 
-	// Inventory client (calls the Inventory system's POS API)
+	// Inventory client
 	invClient := service.NewInventoryClient()
 
 	// Services
@@ -48,16 +48,18 @@ func main() {
 	productSvc := service.NewPOSProductService(productRepo)
 	orderSvc := service.NewOrderService(orderRepo, productRepo, invClient)
 	syncSvc := service.NewStockSyncService(stockRepo, invClient)
+	alertSvc := service.NewPayLaterAlertService(orderRepo)
 
-	// Initial stock sync from Inventory on startup
+	// Initial stock sync on startup
 	go func() {
 		if err := syncSvc.SyncFromInventory(); err != nil {
 			log.Printf("startup stock sync failed: %v (inventory may be offline)", err)
 		}
 	}()
-
-	// Periodic sync every 5 minutes
 	syncSvc.StartPeriodicSync(5 * time.Minute)
+
+	// Pay-later overdue alert loop (every 1 hour)
+	alertSvc.StartAlertLoop(1 * time.Hour)
 
 	// Handlers
 	handlers := router.Handlers{
@@ -66,9 +68,9 @@ func main() {
 		Order:   handler.NewOrderHandler(orderSvc),
 		Stock:   handler.NewStockHandler(syncSvc, invClient),
 		Webhook: handler.NewWebhookHandler(syncSvc),
+		BankQR:  handler.NewBankQRHandler(bankQRRepo),
 	}
 
-	// Fiber app
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			return response.Error(c, fiber.StatusInternalServerError, err.Error())

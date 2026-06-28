@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"pos-backend/internal/models"
 
 	"gorm.io/gorm"
@@ -14,17 +16,34 @@ func NewOrderRepository(db *gorm.DB) *OrderRepository {
 	return &OrderRepository{db: db}
 }
 
+type OrderFilter struct {
+	CashierID     string
+	PaymentMethod string
+	Status        string
+	OverdueOnly   bool
+}
+
 func (r *OrderRepository) Create(order *models.Order) error {
 	return r.db.Create(order).Error
 }
 
-func (r *OrderRepository) FindAll(page, limit int, cashierID string) ([]models.Order, int64, error) {
+func (r *OrderRepository) FindAll(page, limit int, filter OrderFilter) ([]models.Order, int64, error) {
 	var orders []models.Order
 	var total int64
 
 	q := r.db.Model(&models.Order{})
-	if cashierID != "" {
-		q = q.Where("cashier_id = ?", cashierID)
+	if filter.CashierID != "" {
+		q = q.Where("cashier_id = ?", filter.CashierID)
+	}
+	if filter.PaymentMethod != "" {
+		q = q.Where("payment_method = ?", filter.PaymentMethod)
+	}
+	if filter.Status != "" {
+		q = q.Where("status = ?", filter.Status)
+	}
+	if filter.OverdueOnly {
+		q = q.Where("payment_method = ? AND is_paid = false AND payment_due_date < ? AND status = ?",
+			models.PaymentPayLater, time.Now(), models.OrderStatusCompleted)
 	}
 	q.Count(&total)
 	err := q.Preload("Items").Preload("Cashier").
@@ -57,4 +76,21 @@ func (r *OrderRepository) UpdateStatus(id string, status models.OrderStatus, fai
 		updates["fail_reason"] = failReason
 	}
 	return r.db.Model(&models.Order{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *OrderRepository) MarkAsPaid(id string) error {
+	now := time.Now()
+	return r.db.Model(&models.Order{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"is_paid": true,
+		"paid_at": now,
+	}).Error
+}
+
+func (r *OrderRepository) FindOverduePaylater() ([]models.Order, error) {
+	var orders []models.Order
+	err := r.db.Where(
+		"payment_method = ? AND is_paid = false AND payment_due_date < ? AND status = ?",
+		models.PaymentPayLater, time.Now(), models.OrderStatusCompleted,
+	).Find(&orders).Error
+	return orders, err
 }
