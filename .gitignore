@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build output
+/pos-backend
+/pos-backend.exe
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp / scratchpad
+tmp/
