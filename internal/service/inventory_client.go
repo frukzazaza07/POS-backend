@@ -83,6 +83,42 @@ func (c *InventoryClient) CheckAvailability(posProductID string, quantity int) (
 	return &avail, json.Unmarshal(body, &avail)
 }
 
+// --- Barcode lookup ---
+
+type BarcodeProduct struct {
+	ID           string          `json:"id"`
+	PosProductID string          `json:"pos_product_id"`
+	Name         string          `json:"name"`
+	SKU          string          `json:"sku"`
+	Barcode      string          `json:"barcode"`
+	IsActive     bool            `json:"is_active"`
+	BOM          []BarcodeItem   `json:"bom"`
+	CreatedAt    string          `json:"created_at"`
+	UpdatedAt    string          `json:"updated_at"`
+}
+
+type BarcodeItem struct {
+	InventoryItemID string            `json:"inventory_item_id"`
+	QuantityRequired float64          `json:"quantity_required"`
+	InventoryItem   BarcodeItemDetail `json:"inventory_item"`
+}
+
+type BarcodeItemDetail struct {
+	SKU             string  `json:"sku"`
+	Name            string  `json:"name"`
+	Unit            string  `json:"unit"`
+	QuantityInStock float64 `json:"quantity_in_stock"`
+}
+
+func (c *InventoryClient) GetProductByBarcode(barcode string) (*BarcodeProduct, error) {
+	body, err := c.get("/api/v1/pos/products/barcode/" + barcode)
+	if err != nil {
+		return nil, err
+	}
+	var product BarcodeProduct
+	return &product, json.Unmarshal(body, &product)
+}
+
 // --- Stock deduction ---
 
 type DeductRequest struct {

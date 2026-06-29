@@ -137,6 +137,27 @@ export interface ProductAvailability {
   }>;
 }
 
+export interface BarcodeProduct {
+  id: string;
+  pos_product_id: string;
+  name: string;
+  sku: string;
+  barcode: string;
+  is_active: boolean;
+  bom: Array<{
+    inventory_item_id: string;
+    quantity_required: number;
+    inventory_item: {
+      sku: string;
+      name: string;
+      unit: string;
+      quantity_in_stock: number;
+    };
+  }>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ApiResponse<T> {
   status: 'success' | 'error';
   message?: string;
@@ -254,6 +275,7 @@ POST /api/v1/users/register
 |---|---|---|
 | `GET` | `/api/v1/products?page=1&limit=20` | any |
 | `GET` | `/api/v1/products/:id` | any |
+| `GET` | `/api/v1/products/barcode/:barcode` | any |
 | `POST` | `/api/v1/products` | admin |
 | `PUT` | `/api/v1/products/:id` | admin |
 | `DELETE` | `/api/v1/products/:id` | admin |
@@ -271,10 +293,50 @@ POST /api/v1/users/register
 ```
 > `pos_product_id` must match the ID registered in the Inventory system.
 
+### Lookup by Barcode
+
+Used when a cashier scans a product barcode. Returns the product's inventory composition (BOM) with live stock quantities so the POS can verify availability before adding to an order.
+
+```
+GET /api/v1/products/barcode/:barcode
+```
+
+**Response `data`:**
+```json
+{
+  "id": "prod-espresso-001",
+  "pos_product_id": "pos-espresso",
+  "name": "Espresso",
+  "sku": "BEV-ESP",
+  "barcode": "1234567890128",
+  "is_active": true,
+  "bom": [
+    {
+      "inventory_item_id": "inv-coffee-beans-001",
+      "quantity_required": 18,
+      "inventory_item": {
+        "sku": "RAW-COFFEE-BEANS",
+        "name": "Coffee Beans (Arabica)",
+        "unit": "g",
+        "quantity_in_stock": 4244
+      }
+    }
+  ],
+  "created_at": "2026-06-28T23:44:50Z",
+  "updated_at": "2026-06-29T22:31:34Z"
+}
+```
+
+Returns `404` if no product with that barcode exists.
+
 ```ts
 // src/services/products.ts
 export const getProducts = (params?: { page?: number; limit?: number }) =>
   api.get<ApiResponse<PaginatedResponse<POSProduct>>>('/api/v1/products', { params })
+    .then(r => r.data.data!);
+
+export const getProductByBarcode = (barcode: string): Promise<BarcodeProduct> =>
+  api.get<ApiResponse<BarcodeProduct>>(`/api/v1/products/barcode/${barcode}`)
     .then(r => r.data.data!);
 
 export const createProduct = (body: Partial<POSProduct>) =>
@@ -821,6 +883,7 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 | `POST` | `/api/v1/users/register` | JWT | admin |
 | `GET` | `/api/v1/products` | JWT | any |
 | `GET` | `/api/v1/products/:id` | JWT | any |
+| `GET` | `/api/v1/products/barcode/:barcode` | JWT | any |
 | `POST` | `/api/v1/products` | JWT | admin |
 | `PUT` | `/api/v1/products/:id` | JWT | admin |
 | `DELETE` | `/api/v1/products/:id` | JWT | admin |
@@ -867,7 +930,7 @@ src/
 │   └── errors.ts     # getErrorMessage()
 ├── services/
 │   ├── auth.ts       # login, logout, getCurrentUser
-│   ├── products.ts   # CRUD
+│   ├── products.ts   # CRUD + getProductByBarcode
 │   ├── orders.ts     # createOrder, getOrders, cancelOrder, markOrderPaid
 │   ├── config.ts     # getBankQRConfig, setBankQRConfig
 │   └── stock.ts      # getStock, checkAvailability, syncStock

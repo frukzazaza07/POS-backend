@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"pos-backend/internal/service"
 	"pos-backend/pkg/response"
 
@@ -36,6 +38,19 @@ func (h *StockHandler) SyncStock(c *fiber.Ctx) error {
 		"message": "sync complete",
 		"count":   len(items),
 	})
+}
+
+// GetProductByBarcode looks up a product in the Inventory system by barcode.
+func (h *StockHandler) GetProductByBarcode(c *fiber.Ctx) error {
+	barcode := c.Params("barcode")
+	product, err := h.invClient.GetProductByBarcode(barcode)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return response.Error(c, fiber.StatusNotFound, "product not found")
+		}
+		return response.Error(c, fiber.StatusBadGateway, "inventory lookup failed: "+err.Error())
+	}
+	return response.Success(c, product)
 }
 
 // CheckAvailability proxies to the Inventory system in real time.

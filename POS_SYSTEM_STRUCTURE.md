@@ -55,7 +55,7 @@ investory-management-backend/
 │   │   └── webhook_repository.go
 │   │
 │   ├── router/
-│   │   └── router.go                  # Route groups: /auth, /api/v1 (JWT), /api/v1/pos (API-key)
+│   │   └── router.go                  # Route groups: /auth, /api/v1 (JWT), /api/v1/pos (API-key); barcode lookup in POS group
 │   │
 │   └── service/                       # Business logic layer
 │       ├── auth_service.go            # bcrypt hash, JWT sign/verify
@@ -227,11 +227,12 @@ swag init
 
 ## How POS Backend Connects to This System
 
-The POS Backend ([pos-backend](../)) calls three endpoints on this system:
+The POS Backend ([pos-backend](../)) calls four endpoints on this system:
 
 | POS action | Inventory endpoint |
 |---|---|
 | Startup stock sync | `GET /api/v1/pos/stock/levels` |
+| Barcode scan lookup | `GET /api/v1/pos/products/barcode/{barcode}` |
 | Availability check before order | `GET /api/v1/pos/products/:id/availability` |
 | Stock deduction after order | `POST /api/v1/pos/stock/deduct` |
 

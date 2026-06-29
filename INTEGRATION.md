@@ -166,7 +166,57 @@ X-API-Key: <api-key>
 
 ---
 
-### 2.4 ตัดสต็อกหลังขาย (Idempotent)
+### 2.4 ค้นหาสินค้าด้วย Barcode
+
+ใช้เมื่อแคชเชียร์สแกน barcode สินค้า คืนข้อมูล product พร้อม BOM และ stock ปัจจุบันของแต่ละ inventory item
+
+```http
+GET /api/v1/pos/products/barcode/{barcode}
+X-API-Key: <api-key>
+```
+
+**Response (สำเร็จ):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "prod-espresso-001",
+    "pos_product_id": "pos-espresso",
+    "name": "Espresso",
+    "sku": "BEV-ESP",
+    "barcode": "1234567890128",
+    "is_active": true,
+    "bom": [
+      {
+        "inventory_item_id": "inv-coffee-beans-001",
+        "quantity_required": 18,
+        "inventory_item": {
+          "sku": "RAW-COFFEE-BEANS",
+          "name": "Coffee Beans (Arabica)",
+          "unit": "g",
+          "quantity_in_stock": 4244
+        }
+      }
+    ],
+    "created_at": "2026-06-28T23:44:50Z",
+    "updated_at": "2026-06-29T22:31:34Z"
+  }
+}
+```
+
+**Response (ไม่พบ barcode — HTTP 404):**
+```json
+{
+  "status": "error",
+  "message": "product not found"
+}
+```
+
+> หาก `barcode` field ยังไม่ได้ตั้งค่าใน product ให้ตั้งผ่าน `PUT /api/v1/products/{id}` ด้วย JWT
+
+---
+
+### 2.5 ตัดสต็อกหลังขาย (Idempotent)
 
 **สำคัญ:** ต้องส่ง `pos_order_id` ที่ unique ต่อออเดอร์เสมอ  
 ระบบจะ deduplicate — ถ้าส่งซ้ำ order เดิมจะ return `already_processed` ไม่ตัดสต็อกซ้ำ
@@ -601,6 +651,7 @@ GET             /api/v1/webhooks/{id}/logs
 POST /api/v1/pos/stock/deduct
 GET  /api/v1/pos/stock/levels
 GET  /api/v1/pos/products/{pos_product_id}/availability
+GET  /api/v1/pos/products/barcode/{barcode}
 ```
 
 ### Docs

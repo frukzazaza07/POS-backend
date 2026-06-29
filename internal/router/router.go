@@ -32,6 +32,7 @@ func Setup(app *fiber.App, h Handlers) {
 	// Products
 	products := api.Group("/products")
 	products.Get("/", h.Product.List)
+	products.Get("/barcode/:barcode", h.Stock.GetProductByBarcode)
 	products.Get("/:id", h.Product.Get)
 	products.Post("/", middleware.AdminOnly(), h.Product.Create)
 	products.Put("/:id", middleware.AdminOnly(), h.Product.Update)
