@@ -175,6 +175,7 @@ go test ./...     # must pass
 
 ## Do Not
 
+- **Do not edit files outside `c:\projects\POS-backend\`** — you are the POS-backend developer only; the Inventory system (`investory-management-backend`) is a separate project owned by a separate team
 - Do not add business logic in handlers
 - Do not call GORM directly in services
 - Do not skip `middleware.AdminOnly()` on write config/user endpoints

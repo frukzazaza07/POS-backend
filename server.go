@@ -92,6 +92,14 @@ func main() {
 		port = "4000"
 	}
 
-	log.Printf("POS Backend running on :%s", port)
-	log.Fatal(app.Listen(":" + port))
+	certFile := os.Getenv("TLS_CERT")
+	keyFile := os.Getenv("TLS_KEY")
+
+	if certFile != "" && keyFile != "" {
+		log.Printf("POS Backend running on https://localhost:%s", port)
+		log.Fatal(app.ListenTLS(":"+port, certFile, keyFile))
+	} else {
+		log.Printf("POS Backend running on http://localhost:%s", port)
+		log.Fatal(app.Listen(":" + port))
+	}
 }
