@@ -32,6 +32,11 @@ type Order struct {
 	Cashier       *User         `gorm:"foreignKey:CashierID" json:"cashier,omitempty"`
 	Status        OrderStatus   `gorm:"type:varchar(20);default:PENDING;not null" json:"status"`
 	TotalAmount   float64       `gorm:"not null" json:"total_amount"`
+	// TotalCost and Profit are admin-only — stripped from responses for non-admin
+	// roles. TotalCost is snapshotted from item costs at order creation; Profit is
+	// derived (TotalAmount - TotalCost), computed at read time, never persisted.
+	TotalCost     float64       `gorm:"default:0" json:"total_cost,omitempty"`
+	Profit        float64       `gorm:"-" json:"profit,omitempty"`
 	Notes         string        `json:"notes"`
 	FailReason    string        `json:"fail_reason,omitempty"`
 	Items         []OrderItem   `gorm:"foreignKey:OrderID" json:"items,omitempty"`
@@ -52,6 +57,8 @@ type OrderItem struct {
 	Quantity     int     `gorm:"not null" json:"quantity"`
 	UnitPrice    float64 `gorm:"not null" json:"unit_price"`
 	Subtotal     float64 `gorm:"not null" json:"subtotal"`
+	// CostPrice is the per-unit cost snapshotted at order time. Admin-only.
+	CostPrice float64 `gorm:"default:0" json:"cost_price,omitempty"`
 }
 
 func GeneratePosOrderID() string {

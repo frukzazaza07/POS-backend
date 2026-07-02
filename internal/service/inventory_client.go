@@ -132,9 +132,21 @@ type DeductItem struct {
 }
 
 type DeductResponse struct {
-	PosOrderID string          `json:"pos_order_id"`
-	Status     string          `json:"status"` // "processed" | "already_processed"
-	Deductions []DeductDetail  `json:"deductions,omitempty"`
+	PosOrderID string         `json:"pos_order_id"`
+	Status     string         `json:"status"` // "processed" | "already_processed"
+	Deductions []DeductDetail `json:"deductions,omitempty"`
+	// CostBreakdown is optional — populated only once the Inventory system
+	// implements recipe costing (see INVENTORY_COST_INTEGRATION.md). Absent or
+	// empty means POS falls back to POSProduct.CostPrice.
+	CostBreakdown []CostBreakdownItem `json:"cost_breakdown,omitempty"`
+}
+
+// CostBreakdownItem is the per-product recipe cost for one order, computed by
+// the Inventory system from its BOM + ingredient unit costs.
+type CostBreakdownItem struct {
+	PosProductID string  `json:"pos_product_id"`
+	UnitCost     float64 `json:"unit_cost"`
+	TotalCost    float64 `json:"total_cost"`
 }
 
 type DeductDetail struct {

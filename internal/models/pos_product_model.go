@@ -8,6 +8,10 @@ type POSProduct struct {
 	Name         string  `gorm:"not null" json:"name"`
 	Description  string  `json:"description"`
 	Price        float64 `gorm:"not null" json:"price"`
-	Category     string  `json:"category"`
-	IsActive     bool    `gorm:"default:true" json:"is_active"`
+	// CostPrice is the per-unit cost used to compute profit. Admin-only — stripped
+	// from responses for non-admin roles. Manually set unless synced from the
+	// Inventory system's recipe cost (see INVENTORY_COST_INTEGRATION.md).
+	CostPrice float64 `gorm:"default:0" json:"cost_price,omitempty"`
+	Category  string  `json:"category"`
+	IsActive  bool    `gorm:"default:true" json:"is_active"`
 }

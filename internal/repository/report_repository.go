@@ -39,6 +39,8 @@ type TopProduct struct {
 	ProductName  string  `json:"product_name"`
 	TotalQty     int64   `json:"total_qty"`
 	TotalRevenue float64 `json:"total_revenue"`
+	TotalCost    float64 `json:"total_cost"`
+	Profit       float64 `json:"profit"`
 }
 
 type CategoryRevenue struct {
@@ -54,17 +56,18 @@ type CashierSales struct {
 	Revenue     float64 `json:"revenue"`
 }
 
-func (r *ReportRepository) GetCompletedRevenueSummary(from, to time.Time) (revenue float64, count int64, err error) {
+func (r *ReportRepository) GetCompletedRevenueSummary(from, to time.Time) (revenue, cost float64, count int64, err error) {
 	type result struct {
 		TotalRevenue float64
+		TotalCost    float64
 		OrderCount   int64
 	}
 	var res result
 	err = r.db.Model(&models.Order{}).
-		Select("COALESCE(SUM(total_amount), 0) as total_revenue, COUNT(*) as order_count").
+		Select("COALESCE(SUM(total_amount), 0) as total_revenue, COALESCE(SUM(total_cost), 0) as total_cost, COUNT(*) as order_count").
 		Where("status = ? AND created_at BETWEEN ? AND ?", models.OrderStatusCompleted, from, to).
 		Scan(&res).Error
-	return res.TotalRevenue, res.OrderCount, err
+	return res.TotalRevenue, res.TotalCost, res.OrderCount, err
 }
 
 func (r *ReportRepository) GetStatusCounts(from, to time.Time) ([]StatusCount, error) {
@@ -106,8 +109,10 @@ func (r *ReportRepository) GetTopProducts(from, to time.Time, limit int) ([]TopP
 	err := r.db.Raw(`
 		SELECT oi.pos_product_id,
 		       oi.product_name,
-		       SUM(oi.quantity)  AS total_qty,
-		       SUM(oi.subtotal)  AS total_revenue
+		       SUM(oi.quantity)                          AS total_qty,
+		       SUM(oi.subtotal)                           AS total_revenue,
+		       SUM(oi.cost_price * oi.quantity)           AS total_cost,
+		       SUM(oi.subtotal - oi.cost_price * oi.quantity) AS profit
 		FROM order_items oi
 		JOIN orders o ON o.id = oi.order_id
 		WHERE o.status = ? AND o.created_at BETWEEN ? AND ?

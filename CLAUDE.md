@@ -185,7 +185,7 @@ go test ./...     # must pass
 
 ## Do Not
 
-- **Do not edit files outside `c:\projects\POS-backend\`** — you are the POS-backend developer only; the Inventory system (`investory-management-backend`) is a separate project owned by a separate team
+- **Do not edit files outside `c:\projects\POS-backend\`** — you are the POS-backend developer only. The Inventory system (`investory-management-backend`) is a separate codebase/repo (same owner, different project) — changes there need to be made in that repo directly, not from here. Where POS needs something from Inventory, write a guide/contract doc in this repo (see `INVENTORY_COST_INTEGRATION.md` for an example) instead of trying to edit Inventory's files.
 - Do not add business logic in handlers
 - Do not call GORM directly in services
 - Do not skip `middleware.AdminOnly()` on write config/user endpoints
@@ -211,3 +211,4 @@ go test ./...     # must pass
 | `INVENTORY_INTEGRATION.md` | How POS integrates with Inventory |
 | `INTEGRATION.md` | Inventory system's full API reference |
 | `INVESTORY_SYSTEM_STRUCTURE.md` | Inventory system code structure |
+| `INVENTORY_COST_INTEGRATION.md` | Contract for Inventory to implement recipe-based cost (`cost_breakdown` on stock-deduct) |

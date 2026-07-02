@@ -76,6 +76,7 @@ var messages = map[string]map[string]string{
 	"pos_product_id and name are required":   {EN: "pos_product_id and name are required", TH: "กรุณากรอก pos_product_id และชื่อสินค้า"},
 	"price must be non-negative":             {EN: "price must be non-negative", TH: "ราคาต้องไม่ติดลบ"},
 	"pos_product_id already exists":          {EN: "pos_product_id already exists", TH: "pos_product_id นี้มีอยู่แล้ว"},
+	"cost_price must be non-negative":        {EN: "cost_price must be non-negative", TH: "ต้นทุนต้องไม่ติดลบ"},
 
 	// Order service error strings
 	"order not found":                   {EN: "order not found", TH: "ไม่พบออเดอร์"},

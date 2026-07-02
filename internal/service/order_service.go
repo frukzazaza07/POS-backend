@@ -69,7 +69,7 @@ func (s *OrderService) CreateOrder(cashierID string, req CreateOrderRequest) (*m
 	}
 
 	var orderItems []models.OrderItem
-	var totalAmount float64
+	var totalAmount, totalCost float64
 
 	for _, item := range req.Items {
 		if item.Quantity <= 0 {
@@ -84,12 +84,16 @@ func (s *OrderService) CreateOrder(cashierID string, req CreateOrderRequest) (*m
 		}
 		subtotal := product.Price * float64(item.Quantity)
 		totalAmount += subtotal
+		// CostPrice defaults to the admin-set POSProduct cost; overridden below
+		// with the Inventory system's recipe cost if it provides one.
+		totalCost += product.CostPrice * float64(item.Quantity)
 		orderItems = append(orderItems, models.OrderItem{
 			PosProductID: item.PosProductID,
 			ProductName:  product.Name,
 			Quantity:     item.Quantity,
 			UnitPrice:    product.Price,
 			Subtotal:     subtotal,
+			CostPrice:    product.CostPrice,
 		})
 	}
 
@@ -99,6 +103,7 @@ func (s *OrderService) CreateOrder(cashierID string, req CreateOrderRequest) (*m
 		CashierID:     cashierID,
 		Status:        models.OrderStatusPending,
 		TotalAmount:   totalAmount,
+		TotalCost:     totalCost,
 		Notes:         req.Notes,
 		Items:         orderItems,
 		PaymentMethod: paymentMethod,
@@ -137,14 +142,45 @@ func (s *OrderService) CreateOrder(cashierID string, req CreateOrderRequest) (*m
 		order.FailReason = err.Error()
 		return order, fmt.Errorf("stock deduction failed: %w", err)
 	}
-	_ = deductResp
+	if len(deductResp.CostBreakdown) > 0 {
+		costByProduct := make(map[string]float64, len(deductResp.CostBreakdown))
+		for _, c := range deductResp.CostBreakdown {
+			costByProduct[c.PosProductID] = c.UnitCost
+		}
+		totalCost = 0
+		for i := range order.Items {
+			if unitCost, ok := costByProduct[order.Items[i].PosProductID]; ok {
+				order.Items[i].CostPrice = unitCost
+			}
+			totalCost += order.Items[i].CostPrice * float64(order.Items[i].Quantity)
+		}
+		order.TotalCost = totalCost
+		if err := s.orderRepo.UpdateCosts(order.ID, totalCost, order.Items); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.orderRepo.UpdateStatus(order.ID, models.OrderStatusCompleted, ""); err != nil {
 		return nil, err
 	}
 	order.Status = models.OrderStatusCompleted
 
-	return s.orderRepo.FindByID(order.ID)
+	result, err := s.orderRepo.FindByID(order.ID)
+	if err != nil {
+		return nil, err
+	}
+	applyProfit(result)
+	return result, nil
+}
+
+// applyProfit computes Profit = TotalAmount - TotalCost. Profit is never
+// persisted — always derived at read time so it can't drift from the source
+// figures.
+func applyProfit(o *models.Order) {
+	if o == nil {
+		return
+	}
+	o.Profit = o.TotalAmount - o.TotalCost
 }
 
 func (s *OrderService) ListOrders(page, limit int, filter repository.OrderFilter) ([]models.Order, int64, error) {
@@ -154,11 +190,23 @@ func (s *OrderService) ListOrders(page, limit int, filter repository.OrderFilter
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	return s.orderRepo.FindAll(page, limit, filter)
+	orders, total, err := s.orderRepo.FindAll(page, limit, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range orders {
+		applyProfit(&orders[i])
+	}
+	return orders, total, nil
 }
 
 func (s *OrderService) GetOrder(id string) (*models.Order, error) {
-	return s.orderRepo.FindByID(id)
+	order, err := s.orderRepo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	applyProfit(order)
+	return order, nil
 }
 
 func (s *OrderService) CancelOrder(id, requesterID, requesterRole string) error {

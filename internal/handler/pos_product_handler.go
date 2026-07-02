@@ -26,6 +26,8 @@ func (h *POSProductHandler) List(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
+	role, _ := c.Locals("role").(string)
+	redactProductCosts(items, role)
 
 	return response.Success(c, i18n.T(lang, "product.list"), response.PaginatedData{
 		Items: items,
@@ -41,6 +43,8 @@ func (h *POSProductHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Error(c, fiber.StatusNotFound, i18n.T(lang, "err.product_not_found"))
 	}
+	role, _ := c.Locals("role").(string)
+	redactProductCost(p, role)
 	return response.Success(c, i18n.T(lang, "product.get"), p)
 }
 

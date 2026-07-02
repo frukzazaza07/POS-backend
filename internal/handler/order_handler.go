@@ -41,6 +41,8 @@ func (h *OrderHandler) Create(c *fiber.Ctx) error {
 		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 
+	role, _ := c.Locals("role").(string)
+	redactOrderCost(order, role)
 	return response.Created(c, i18n.T(lang, "order.created"), order)
 }
 
@@ -63,6 +65,7 @@ func (h *OrderHandler) List(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
+	redactOrderCosts(orders, role)
 
 	return response.Success(c, i18n.T(lang, "order.list"), response.PaginatedData{
 		Items: orders,
@@ -78,6 +81,8 @@ func (h *OrderHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Error(c, fiber.StatusNotFound, i18n.T(lang, "err.order_not_found"))
 	}
+	role, _ := c.Locals("role").(string)
+	redactOrderCost(order, role)
 	return response.Success(c, i18n.T(lang, "order.get"), order)
 }
 

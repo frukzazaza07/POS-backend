@@ -67,6 +67,7 @@ export interface POSProduct {
   name: string;
   description: string;
   price: number;
+  cost_price?: number; // admin only — absent/omitted for cashier role
   category: string;
   is_active: boolean;
   created_at: string;
@@ -81,6 +82,7 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  cost_price?: number; // admin only
 }
 
 export interface Order {
@@ -90,6 +92,8 @@ export interface Order {
   cashier?: User;
   status: OrderStatus;
   total_amount: number;
+  total_cost?: number; // admin only
+  profit?: number;     // admin only — total_amount - total_cost
   payment_method: PaymentMethod;
   notes: string;
   fail_reason?: string;
@@ -375,11 +379,17 @@ POST /api/v1/users/register
   "name": "Cafe Latte",
   "description": "Espresso with steamed milk",
   "price": 65.00,
+  "cost_price": 22.50,
   "category": "drinks",
   "is_active": true
 }
 ```
 > `pos_product_id` must match the ID registered in the Inventory system.
+
+> **`cost_price` is admin-only.** Create/Update are already admin-gated routes, so
+> setting it is unrestricted for admins. But `GET /products` and `GET /products/:id`
+> strip `cost_price` from the response for cashier-role callers — don't rely on it
+> being present in the product list a cashier-facing screen renders.
 
 ### Lookup by Barcode
 
@@ -926,6 +936,27 @@ export const syncStock = () =>
 
 All report endpoints require **admin JWT**. All accept `?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: last 30 days). Revenue counts only `COMPLETED` orders.
 
+### Cost & profit visibility
+
+`cost_price` (on products and order items), `total_cost`, `profit`, and `gross_profit`
+are **admin-only everywhere**, not just in this reports section:
+
+| Field | Where it appears | Cashier sees it? |
+|---|---|---|
+| `cost_price` | `POSProduct`, `OrderItem` | ❌ stripped from response |
+| `total_cost`, `profit` | `Order` | ❌ stripped from response |
+| `total_cost`, `gross_profit` | Reports `summary` | N/A — route is admin-only |
+| `total_cost`, `profit` | Reports `products/top` | N/A — route is admin-only |
+
+Non-admin (cashier) responses for products/orders are structurally identical —
+the fields are just omitted (zero value + `omitempty`), so no frontend branching
+is needed beyond `if (isAdmin()) { show cost/profit }`.
+
+`cost_price` on a product is set manually by admins today (via product
+create/update). It will start reflecting real recipe cost automatically once the
+Inventory system implements per-order cost breakdown — no frontend changes
+required when that lands (see `INVENTORY_COST_INTEGRATION.md`).
+
 ### TypeScript types
 
 ```ts
@@ -935,6 +966,8 @@ export type SummaryReport = {
   from: string;
   to: string;
   total_revenue: number;
+  total_cost: number;
+  gross_profit: number;
   order_count: number;
   avg_order_value: number;
   by_status: Array<{ status: OrderStatus; count: number; total_amount: number }>;
@@ -942,7 +975,7 @@ export type SummaryReport = {
 };
 
 export type DailyRevenue = { date: string; revenue: number; order_count: number };
-export type TopProduct   = { pos_product_id: string; product_name: string; total_qty: number; total_revenue: number };
+export type TopProduct   = { pos_product_id: string; product_name: string; total_qty: number; total_revenue: number; total_cost: number; profit: number };
 export type CategoryRevenue = { category: string; revenue: number; order_count: number };
 export type CashierSales = { cashier_id: string; cashier_name: string; order_count: number; revenue: number };
 ```
@@ -959,6 +992,8 @@ GET /api/v1/reports/summary?from=2026-06-01&to=2026-06-30
   "from": "2026-06-01",
   "to": "2026-06-30",
   "total_revenue": 48500.00,
+  "total_cost": 16200.00,
+  "gross_profit": 32300.00,
   "order_count": 312,
   "avg_order_value": 155.45,
   "by_status": [
@@ -996,8 +1031,8 @@ GET /api/v1/reports/products/top?from=2026-06-01&to=2026-06-30&limit=10
 **Response `data`:** array of `TopProduct`, sorted by `total_qty` descending
 ```json
 [
-  { "pos_product_id": "pos-latte",     "product_name": "Latte",     "total_qty": 280, "total_revenue": 25200.00 },
-  { "pos_product_id": "pos-espresso",  "product_name": "Espresso",  "total_qty": 210, "total_revenue": 14700.00 }
+  { "pos_product_id": "pos-latte",     "product_name": "Latte",     "total_qty": 280, "total_revenue": 25200.00, "total_cost": 8400.00, "profit": 16800.00 },
+  { "pos_product_id": "pos-espresso",  "product_name": "Espresso",  "total_qty": 210, "total_revenue": 14700.00, "total_cost": 4200.00, "profit": 10500.00 }
 ]
 ```
 

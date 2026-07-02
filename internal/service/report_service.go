@@ -16,17 +16,19 @@ func NewReportService(repo *repository.ReportRepository) *ReportService {
 }
 
 type SummaryReport struct {
-	From          string                        `json:"from"`
-	To            string                        `json:"to"`
-	TotalRevenue  float64                       `json:"total_revenue"`
-	OrderCount    int64                         `json:"order_count"`
-	AvgOrderValue float64                       `json:"avg_order_value"`
-	ByStatus      []repository.StatusCount      `json:"by_status"`
+	From          string                           `json:"from"`
+	To            string                           `json:"to"`
+	TotalRevenue  float64                          `json:"total_revenue"`
+	TotalCost     float64                          `json:"total_cost"`
+	GrossProfit   float64                          `json:"gross_profit"`
+	OrderCount    int64                            `json:"order_count"`
+	AvgOrderValue float64                          `json:"avg_order_value"`
+	ByStatus      []repository.StatusCount        `json:"by_status"`
 	ByPayment     []repository.PaymentMethodCount `json:"by_payment_method"`
 }
 
 func (s *ReportService) GetSummary(from, to time.Time) (*SummaryReport, error) {
-	revenue, count, err := s.repo.GetCompletedRevenueSummary(from, to)
+	revenue, cost, count, err := s.repo.GetCompletedRevenueSummary(from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +48,8 @@ func (s *ReportService) GetSummary(from, to time.Time) (*SummaryReport, error) {
 		From:          from.Format("2006-01-02"),
 		To:            to.Format("2006-01-02"),
 		TotalRevenue:  revenue,
+		TotalCost:     cost,
+		GrossProfit:   revenue - cost,
 		OrderCount:    count,
 		AvgOrderValue: avg,
 		ByStatus:      byStatus,

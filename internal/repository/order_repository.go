@@ -78,6 +78,24 @@ func (r *OrderRepository) UpdateStatus(id string, status models.OrderStatus, fai
 	return r.db.Model(&models.Order{}).Where("id = ?", id).Updates(updates).Error
 }
 
+// UpdateCosts persists the order's total cost and per-item cost snapshots.
+// Called after order creation once the authoritative cost is known (either the
+// POSProduct fallback set at creation, or a more accurate figure the Inventory
+// system returned in the stock-deduct response).
+func (r *OrderRepository) UpdateCosts(orderID string, totalCost float64, items []models.OrderItem) error {
+	if err := r.db.Model(&models.Order{}).Where("id = ?", orderID).
+		Update("total_cost", totalCost).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := r.db.Model(&models.OrderItem{}).Where("id = ?", item.ID).
+			Update("cost_price", item.CostPrice).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *OrderRepository) MarkAsPaid(id string) error {
 	now := time.Now()
 	return r.db.Model(&models.Order{}).Where("id = ?", id).Updates(map[string]interface{}{

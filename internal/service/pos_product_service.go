@@ -15,20 +15,24 @@ func NewPOSProductService(repo *repository.POSProductRepository) *POSProductServ
 }
 
 type CreateProductRequest struct {
-	PosProductID string  `json:"pos_product_id"`
-	Name         string  `json:"name"`
-	Description  string  `json:"description"`
-	Price        float64 `json:"price"`
-	Category     string  `json:"category"`
-	IsActive     *bool   `json:"is_active"`
+	PosProductID string   `json:"pos_product_id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Price        *float64 `json:"price"`
+	CostPrice    *float64 `json:"cost_price"`
+	Category     string   `json:"category"`
+	IsActive     *bool    `json:"is_active"`
 }
 
 func (s *POSProductService) Create(req CreateProductRequest) (*models.POSProduct, error) {
 	if req.PosProductID == "" || req.Name == "" {
 		return nil, errors.New("pos_product_id and name are required")
 	}
-	if req.Price < 0 {
+	if req.Price == nil || *req.Price < 0 {
 		return nil, errors.New("price must be non-negative")
+	}
+	if req.CostPrice != nil && *req.CostPrice < 0 {
+		return nil, errors.New("cost_price must be non-negative")
 	}
 	if existing, _ := s.repo.FindByPosProductID(req.PosProductID); existing != nil {
 		return nil, errors.New("pos_product_id already exists")
@@ -38,12 +42,17 @@ func (s *POSProductService) Create(req CreateProductRequest) (*models.POSProduct
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
+	costPrice := 0.0
+	if req.CostPrice != nil {
+		costPrice = *req.CostPrice
+	}
 
 	p := &models.POSProduct{
 		PosProductID: req.PosProductID,
 		Name:         req.Name,
 		Description:  req.Description,
-		Price:        req.Price,
+		Price:        *req.Price,
+		CostPrice:    costPrice,
 		Category:     req.Category,
 		IsActive:     isActive,
 	}
@@ -79,8 +88,11 @@ func (s *POSProductService) Update(id string, req CreateProductRequest) (*models
 	if req.Description != "" {
 		p.Description = req.Description
 	}
-	if req.Price >= 0 {
-		p.Price = req.Price
+	if req.Price != nil && *req.Price >= 0 {
+		p.Price = *req.Price
+	}
+	if req.CostPrice != nil && *req.CostPrice >= 0 {
+		p.CostPrice = *req.CostPrice
 	}
 	if req.Category != "" {
 		p.Category = req.Category
