@@ -13,6 +13,7 @@ import (
 
 	"pos-backend/internal/database"
 	"pos-backend/internal/handler"
+	"pos-backend/internal/middleware"
 	"pos-backend/internal/repository"
 	"pos-backend/internal/router"
 	"pos-backend/internal/service"
@@ -39,6 +40,7 @@ func main() {
 	orderRepo := repository.NewOrderRepository(db)
 	stockRepo := repository.NewStockCacheRepository(db)
 	bankQRRepo := repository.NewBankQRConfigRepository(db)
+	reportRepo := repository.NewReportRepository(db)
 
 	// Inventory client
 	invClient := service.NewInventoryClient()
@@ -49,6 +51,7 @@ func main() {
 	orderSvc := service.NewOrderService(orderRepo, productRepo, invClient)
 	syncSvc := service.NewStockSyncService(stockRepo, invClient)
 	alertSvc := service.NewPayLaterAlertService(orderRepo)
+	reportSvc := service.NewReportService(reportRepo)
 
 	// Initial stock sync on startup
 	go func() {
@@ -69,6 +72,7 @@ func main() {
 		Stock:   handler.NewStockHandler(syncSvc, invClient),
 		Webhook: handler.NewWebhookHandler(syncSvc),
 		BankQR:  handler.NewBankQRHandler(bankQRRepo),
+		Report:  handler.NewReportHandler(reportSvc),
 	}
 
 	app := fiber.New(fiber.Config{
@@ -79,6 +83,7 @@ func main() {
 
 	app.Use(recover.New())
 	app.Use(logger.New())
+	app.Use(middleware.Language())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",

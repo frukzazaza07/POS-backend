@@ -28,15 +28,17 @@ Every response uses this wrapper:
 
 1. [TypeScript Types](#1-typescript-types)
 2. [Axios Setup](#2-axios-setup)
-3. [Authentication](#3-authentication)
-4. [Products](#4-products)
-5. [Orders & Payment Methods](#5-orders--payment-methods)
-6. [Bank QR Config](#6-bank-qr-config)
-7. [Pay Later Management](#7-pay-later-management)
-8. [Stock](#8-stock)
-9. [Role-Based Access](#9-role-based-access)
-10. [Error Handling](#10-error-handling)
-11. [Quick Reference](#11-quick-reference)
+3. [Language / i18n](#3-language--i18n)
+4. [Authentication](#4-authentication)
+5. [Products](#5-products)
+6. [Orders & Payment Methods](#6-orders--payment-methods)
+7. [Bank QR Config](#7-bank-qr-config)
+8. [Pay Later Management](#8-pay-later-management)
+9. [Stock](#9-stock)
+10. [Reports](#10-reports)
+11. [Role-Based Access](#11-role-based-access)
+12. [Error Handling](#12-error-handling)
+13. [Quick Reference](#13-quick-reference)
 
 ---
 
@@ -188,6 +190,11 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('pos_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // Attach language so all error messages come back in the right language
+  const lang = localStorage.getItem('pos_lang') ?? 'th';
+  config.headers['Accept-Language'] = lang;
+
   return config;
 });
 
@@ -213,7 +220,88 @@ VITE_API_URL=http://localhost:4000
 
 ---
 
-## 3. Authentication
+## 3. Language / i18n
+
+The API returns error messages in **Thai (TH)** or **English (EN)** based on the request.
+
+### Supported languages
+
+| Code | Language |
+|---|---|
+| `th` | ภาษาไทย (default recommended for POS) |
+| `en` | English |
+
+### How to set the language
+
+**Option A — `Accept-Language` header (recommended, set once in Axios interceptor above):**
+```
+Accept-Language: th
+Accept-Language: en
+```
+
+**Option B — `?lang=` query param (per-request override):**
+```
+GET /api/v1/products?lang=th
+POST /auth/login?lang=en
+```
+
+Query param takes priority over the header.
+
+### Language switcher
+
+```ts
+// src/lib/lang.ts
+export type Lang = 'th' | 'en';
+
+export function getLang(): Lang {
+  return (localStorage.getItem('pos_lang') as Lang) ?? 'th';
+}
+
+export function setLang(lang: Lang) {
+  localStorage.setItem('pos_lang', lang);
+}
+```
+
+```tsx
+// src/components/LangToggle.tsx
+import { useState } from 'react';
+import { getLang, setLang, type Lang } from '../lib/lang';
+
+export default function LangToggle() {
+  const [lang, setLocal] = useState<Lang>(getLang());
+
+  const toggle = () => {
+    const next: Lang = lang === 'th' ? 'en' : 'th';
+    setLang(next);
+    setLocal(next);
+    // Axios interceptor reads pos_lang on every request — no reload needed
+  };
+
+  return (
+    <button onClick={toggle}>
+      {lang === 'th' ? 'EN' : 'ไทย'}
+    </button>
+  );
+}
+```
+
+### Error message examples
+
+| Key | EN | TH |
+|---|---|---|
+| Invalid credentials | `invalid credentials` | `อีเมลหรือรหัสผ่านไม่ถูกต้อง` |
+| Missing body fields | `email and password are required` | `กรุณากรอกอีเมลและรหัสผ่าน` |
+| Product not found | `product not found` | `ไม่พบสินค้า` |
+| Order not found | `order not found` | `ไม่พบออเดอร์` |
+| Bank QR not configured | `bank QR config not configured` | `ยังไม่ได้ตั้งค่า Bank QR` |
+| Sync complete | `sync complete` | `ซิงค์สำเร็จ` |
+
+> Technical errors containing dynamic data (inventory amounts, DB errors) are always returned in English.
+
+---
+
+## 4. Authentication
+
 
 ### Login
 ```
@@ -269,7 +357,7 @@ POST /api/v1/users/register
 
 ---
 
-## 4. Products
+## 5. Products
 
 | Method | Path | Role |
 |---|---|---|
@@ -351,7 +439,7 @@ export const deleteProduct = (id: string) =>
 
 ---
 
-## 5. Orders & Payment Methods
+## 6. Orders & Payment Methods
 
 ### Payment Method Options
 
@@ -559,7 +647,7 @@ Only `PENDING` orders. Cashiers can cancel their own; admins can cancel any.
 
 ---
 
-## 6. Bank QR Config
+## 7. Bank QR Config
 
 Used when `payment_method = "BANK_QRCODE"`. The admin sets the store's bank details once; the cashier screen shows the QR to the customer after order creation.
 
@@ -704,7 +792,7 @@ export default function BankQRConfigPage() {
 
 ---
 
-## 7. Pay Later Management
+## 8. Pay Later Management
 
 ### How it works
 
@@ -801,7 +889,7 @@ Connect this to LINE Notify, Discord webhook, or any HTTP endpoint.
 
 ---
 
-## 8. Stock
+## 9. Stock
 
 ### Get Cached Stock (fast)
 ```
@@ -834,7 +922,157 @@ export const syncStock = () =>
 
 ---
 
-## 9. Role-Based Access
+## 10. Reports
+
+All report endpoints require **admin JWT**. All accept `?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: last 30 days). Revenue counts only `COMPLETED` orders.
+
+### TypeScript types
+
+```ts
+// src/types/api.ts (add)
+
+export type SummaryReport = {
+  from: string;
+  to: string;
+  total_revenue: number;
+  order_count: number;
+  avg_order_value: number;
+  by_status: Array<{ status: OrderStatus; count: number; total_amount: number }>;
+  by_payment_method: Array<{ payment_method: PaymentMethod; count: number; total_amount: number }>;
+};
+
+export type DailyRevenue = { date: string; revenue: number; order_count: number };
+export type TopProduct   = { pos_product_id: string; product_name: string; total_qty: number; total_revenue: number };
+export type CategoryRevenue = { category: string; revenue: number; order_count: number };
+export type CashierSales = { cashier_id: string; cashier_name: string; order_count: number; revenue: number };
+```
+
+---
+
+### Summary
+```
+GET /api/v1/reports/summary?from=2026-06-01&to=2026-06-30
+```
+**Response `data`:**
+```json
+{
+  "from": "2026-06-01",
+  "to": "2026-06-30",
+  "total_revenue": 48500.00,
+  "order_count": 312,
+  "avg_order_value": 155.45,
+  "by_status": [
+    { "status": "COMPLETED", "count": 312, "total_amount": 48500.00 },
+    { "status": "CANCELLED", "count": 5,   "total_amount": 0 }
+  ],
+  "by_payment_method": [
+    { "payment_method": "CASH",       "count": 200, "total_amount": 31000.00 },
+    { "payment_method": "BANK_QRCODE","count": 90,  "total_amount": 14000.00 },
+    { "payment_method": "PAY_LATER",  "count": 22,  "total_amount": 3500.00  }
+  ]
+}
+```
+
+---
+
+### Daily Revenue
+```
+GET /api/v1/reports/revenue/daily?from=2026-06-01&to=2026-06-30
+```
+**Response `data`:** array of `DailyRevenue`
+```json
+[
+  { "date": "2026-06-01", "revenue": 1520.00, "order_count": 10 },
+  { "date": "2026-06-02", "revenue": 1840.00, "order_count": 12 }
+]
+```
+
+---
+
+### Top Products
+```
+GET /api/v1/reports/products/top?from=2026-06-01&to=2026-06-30&limit=10
+```
+**Response `data`:** array of `TopProduct`, sorted by `total_qty` descending
+```json
+[
+  { "pos_product_id": "pos-latte",     "product_name": "Latte",     "total_qty": 280, "total_revenue": 25200.00 },
+  { "pos_product_id": "pos-espresso",  "product_name": "Espresso",  "total_qty": 210, "total_revenue": 14700.00 }
+]
+```
+
+---
+
+### Revenue by Category
+```
+GET /api/v1/reports/revenue/category?from=2026-06-01&to=2026-06-30
+```
+**Response `data`:** array of `CategoryRevenue`, sorted by `revenue` descending
+```json
+[
+  { "category": "Beverages",     "revenue": 38000.00, "order_count": 240 },
+  { "category": "Food",          "revenue": 8500.00,  "order_count": 65  },
+  { "category": "Uncategorized", "revenue": 2000.00,  "order_count": 7   }
+]
+```
+Products without a `category` are grouped as `"Uncategorized"`.
+
+---
+
+### Cashier Sales
+```
+GET /api/v1/reports/cashiers?from=2026-06-01&to=2026-06-30
+```
+**Response `data`:** array of `CashierSales`, sorted by `revenue` descending
+```json
+[
+  { "cashier_id": "uuid-1", "cashier_name": "Alice", "order_count": 180, "revenue": 28000.00 },
+  { "cashier_id": "uuid-2", "cashier_name": "Bob",   "order_count": 132, "revenue": 20500.00 }
+]
+```
+
+---
+
+### Overdue Pay-Later Orders
+```
+GET /api/v1/reports/pay-later/overdue
+```
+No date filter — returns **all** unpaid, overdue, completed PAY_LATER orders, sorted by `payment_due_date` ascending.
+
+**Response `data`:** array of `Order` (same shape as order endpoints)
+
+---
+
+### TypeScript service
+```ts
+// src/services/reports.ts
+import api from '../lib/api';
+import type { ApiResponse, SummaryReport, DailyRevenue, TopProduct, CategoryRevenue, CashierSales, Order } from '../types/api';
+
+type DateParams = { from?: string; to?: string };
+
+export const getReportSummary = (p?: DateParams): Promise<SummaryReport> =>
+  api.get<ApiResponse<SummaryReport>>('/api/v1/reports/summary', { params: p }).then(r => r.data.data!);
+
+export const getDailyRevenue = (p?: DateParams): Promise<DailyRevenue[]> =>
+  api.get<ApiResponse<DailyRevenue[]>>('/api/v1/reports/revenue/daily', { params: p }).then(r => r.data.data!);
+
+export const getTopProducts = (p?: DateParams & { limit?: number }): Promise<TopProduct[]> =>
+  api.get<ApiResponse<TopProduct[]>>('/api/v1/reports/products/top', { params: p }).then(r => r.data.data!);
+
+export const getCategoryRevenue = (p?: DateParams): Promise<CategoryRevenue[]> =>
+  api.get<ApiResponse<CategoryRevenue[]>>('/api/v1/reports/revenue/category', { params: p }).then(r => r.data.data!);
+
+export const getCashierSales = (p?: DateParams): Promise<CashierSales[]> =>
+  api.get<ApiResponse<CashierSales[]>>('/api/v1/reports/cashiers', { params: p }).then(r => r.data.data!);
+
+export const getOverduePayLater = (): Promise<Order[]> =>
+  api.get<ApiResponse<Order[]>>('/api/v1/reports/pay-later/overdue').then(r => r.data.data!);
+```
+
+---
+
+## 11. Role-Based Access
 
 ```ts
 export const isAdmin = () => getCurrentUser()?.role === 'admin';
@@ -848,7 +1086,7 @@ export const isAdmin = () => getCurrentUser()?.role === 'admin';
 
 ---
 
-## 10. Error Handling
+## 12. Error Handling
 
 ```ts
 // src/lib/errors.ts
@@ -872,7 +1110,7 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 
 ---
 
-## 11. Quick Reference
+## 13. Quick Reference
 
 ### All Endpoints
 
@@ -898,6 +1136,12 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 | `GET` | `/api/v1/stock` | JWT | any |
 | `POST` | `/api/v1/stock/sync` | JWT | admin |
 | `GET` | `/api/v1/stock/availability/:id?quantity=N` | JWT | any |
+| `GET` | `/api/v1/reports/summary` | JWT | admin |
+| `GET` | `/api/v1/reports/revenue/daily` | JWT | admin |
+| `GET` | `/api/v1/reports/products/top` | JWT | admin |
+| `GET` | `/api/v1/reports/revenue/category` | JWT | admin |
+| `GET` | `/api/v1/reports/cashiers` | JWT | admin |
+| `GET` | `/api/v1/reports/pay-later/overdue` | JWT | admin |
 
 \* Cashiers see only their own orders.  
 \*\* Cashiers can cancel only their own PENDING orders.
@@ -933,7 +1177,8 @@ src/
 │   ├── products.ts   # CRUD + getProductByBarcode
 │   ├── orders.ts     # createOrder, getOrders, cancelOrder, markOrderPaid
 │   ├── config.ts     # getBankQRConfig, setBankQRConfig
-│   └── stock.ts      # getStock, checkAvailability, syncStock
+│   ├── stock.ts      # getStock, checkAvailability, syncStock
+│   └── reports.ts    # getReportSummary, getDailyRevenue, getTopProducts, getCategoryRevenue, getCashierSales, getOverduePayLater
 └── types/
     └── api.ts        # all TypeScript types
 ```

@@ -3,6 +3,7 @@ package handler
 import (
 	"pos-backend/internal/models"
 	"pos-backend/internal/repository"
+	"pos-backend/pkg/i18n"
 	"pos-backend/pkg/promptpay"
 	"pos-backend/pkg/response"
 
@@ -20,39 +21,42 @@ func NewBankQRHandler(repo *repository.BankQRConfigRepository) *BankQRHandler {
 }
 
 func (h *BankQRHandler) Get(c *fiber.Ctx) error {
+	lang := i18n.Lang(c)
 	config, err := h.repo.Get()
 	if err != nil {
-		return response.Error(c, fiber.StatusNotFound, "bank QR config not configured")
+		return response.Error(c, fiber.StatusNotFound, i18n.T(lang, "err.bank_qr_not_configured"))
 	}
-	return response.Success(c, config)
+	return response.Success(c, i18n.T(lang, "config.bank_qr_get"), config)
 }
 
 func (h *BankQRHandler) Upsert(c *fiber.Ctx) error {
+	lang := i18n.Lang(c)
 	var config models.BankQRConfig
 	if err := c.BodyParser(&config); err != nil {
-		return response.Error(c, fiber.StatusBadRequest, "invalid request body")
+		return response.Error(c, fiber.StatusBadRequest, i18n.T(lang, "err.invalid_body"))
 	}
 	if config.BankName == "" || config.AccountName == "" || config.AccountNumber == "" {
-		return response.Error(c, fiber.StatusBadRequest, "bank_name, account_name, and account_number are required")
+		return response.Error(c, fiber.StatusBadRequest, i18n.T(lang, "err.bank_qr_fields_required"))
 	}
 	config.IsActive = true
 	if err := h.repo.Upsert(&config); err != nil {
 		return response.Error(c, fiber.StatusInternalServerError, err.Error())
 	}
 	result, _ := h.repo.Get()
-	return response.Success(c, result)
+	return response.Success(c, i18n.T(lang, "config.bank_qr_updated"), result)
 }
 
 // GetQRCode generates a PromptPay QR code PNG from the stored config.
 // Optional query param ?amount=185.00 embeds the amount (dynamic QR).
 // Returns image/png directly — use as <img src="/api/v1/config/bank-qr/qrcode" />.
 func (h *BankQRHandler) GetQRCode(c *fiber.Ctx) error {
+	lang := i18n.Lang(c)
 	config, err := h.repo.Get()
 	if err != nil {
-		return response.Error(c, fiber.StatusNotFound, "bank QR config not configured")
+		return response.Error(c, fiber.StatusNotFound, i18n.T(lang, "err.bank_qr_not_configured"))
 	}
 	if config.PromptPayID == "" {
-		return response.Error(c, fiber.StatusUnprocessableEntity, "promptpay_id not set in bank QR config — update it via PUT /api/v1/config/bank-qr")
+		return response.Error(c, fiber.StatusUnprocessableEntity, i18n.T(lang, "err.promptpay_not_set"))
 	}
 
 	amount := c.QueryFloat("amount", 0)
@@ -60,7 +64,7 @@ func (h *BankQRHandler) GetQRCode(c *fiber.Ctx) error {
 
 	png, err := qrcode.Encode(payload, qrcode.Medium, 256)
 	if err != nil {
-		return response.Error(c, fiber.StatusInternalServerError, "failed to generate QR code")
+		return response.Error(c, fiber.StatusInternalServerError, i18n.T(lang, "err.qr_generation_failed"))
 	}
 
 	c.Set("Content-Type", "image/png")

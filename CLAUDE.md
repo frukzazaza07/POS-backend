@@ -69,6 +69,16 @@ response.Error(c, status, msg)  // 4xx/5xx
 ```
 Never call `c.JSON()` directly in handlers.
 
+### i18n — always translate user-facing messages
+```go
+lang := i18n.Lang(c)                          // read lang from context (set by middleware)
+i18n.T(lang, "translation_key")               // static messages → use a key
+i18n.T(lang, err.Error())                     // service errors → use error string as key
+```
+- Add new keys to **both** `en` and `th` maps in `pkg/i18n/i18n.go`
+- Technical/dynamic errors (inventory amounts, DB errors) may pass through without translation
+- Language detected from `?lang=th|en` query param or `Accept-Language` header; defaults to `en`
+
 ### Pagination — use `response.PaginatedData`
 ```go
 response.Success(c, response.PaginatedData{
@@ -192,8 +202,10 @@ go test ./...     # must pass
 |---|---|
 | `server.go` | Entry point — wire everything |
 | `internal/router/router.go` | All routes |
+| `internal/middleware/language.go` | Language detection middleware (`?lang=` / `Accept-Language`) |
 | `internal/service/inventory_client.go` | All calls to Inventory system |
 | `internal/service/paylater_alert_service.go` | Overdue alert loop |
+| `pkg/i18n/i18n.go` | EN/TH translations — `T(lang, key)`, `Lang(c)`, `Resolve(c)` |
 | `pkg/promptpay/promptpay.go` | EMVCo PromptPay QR payload builder |
 | `FRONTEND_API_GUIDE.md` | API reference for frontend team |
 | `INVENTORY_INTEGRATION.md` | How POS integrates with Inventory |

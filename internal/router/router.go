@@ -14,6 +14,7 @@ type Handlers struct {
 	Stock   *handler.StockHandler
 	Webhook *handler.WebhookHandler
 	BankQR  *handler.BankQRHandler
+	Report  *handler.ReportHandler
 }
 
 func Setup(app *fiber.App, h Handlers) {
@@ -54,6 +55,15 @@ func Setup(app *fiber.App, h Handlers) {
 
 	// Admin: register users
 	api.Post("/users/register", middleware.AdminOnly(), h.Auth.Register)
+
+	// Reports (admin only)
+	reports := api.Group("/reports", middleware.AdminOnly())
+	reports.Get("/summary", h.Report.Summary)
+	reports.Get("/revenue/daily", h.Report.DailyRevenue)
+	reports.Get("/products/top", h.Report.TopProducts)
+	reports.Get("/revenue/category", h.Report.CategoryRevenue)
+	reports.Get("/cashiers", h.Report.CashierSales)
+	reports.Get("/pay-later/overdue", h.Report.OverduePayLater)
 
 	// Config
 	config := api.Group("/config")

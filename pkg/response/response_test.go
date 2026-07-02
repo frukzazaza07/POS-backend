@@ -28,7 +28,7 @@ func decode(t *testing.T, resp *http.Response) genericResp {
 func TestSuccess(t *testing.T) {
 	app := fiber.New()
 	app.Get("/", func(c *fiber.Ctx) error {
-		return response.Success(c, fiber.Map{"key": "value"})
+		return response.Success(c, "ok", fiber.Map{"key": "value"})
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -50,7 +50,7 @@ func TestSuccess(t *testing.T) {
 func TestCreated(t *testing.T) {
 	app := fiber.New()
 	app.Post("/", func(c *fiber.Ctx) error {
-		return response.Created(c, fiber.Map{"id": "123"})
+		return response.Created(c, "created", fiber.Map{"id": "123"})
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)

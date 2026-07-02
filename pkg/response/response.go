@@ -15,12 +15,12 @@ type PaginatedData struct {
 	Limit int         `json:"limit"`
 }
 
-func Success(c *fiber.Ctx, data interface{}) error {
-	return c.Status(fiber.StatusOK).JSON(Response{Status: "success", Data: data})
+func Success(c *fiber.Ctx, message string, data interface{}) error {
+	return c.Status(fiber.StatusOK).JSON(Response{Status: "success", Message: message, Data: data})
 }
 
-func Created(c *fiber.Ctx, data interface{}) error {
-	return c.Status(fiber.StatusCreated).JSON(Response{Status: "success", Data: data})
+func Created(c *fiber.Ctx, message string, data interface{}) error {
+	return c.Status(fiber.StatusCreated).JSON(Response{Status: "success", Message: message, Data: data})
 }
 
 func Error(c *fiber.Ctx, status int, message string) error {
