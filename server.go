@@ -41,6 +41,7 @@ func main() {
 	stockRepo := repository.NewStockCacheRepository(db)
 	bankQRRepo := repository.NewBankQRConfigRepository(db)
 	reportRepo := repository.NewReportRepository(db)
+	vatConfigRepo := repository.NewVatConfigRepository(db)
 
 	// Inventory client
 	invClient := service.NewInventoryClient()
@@ -48,10 +49,11 @@ func main() {
 	// Services
 	authSvc := service.NewAuthService(userRepo)
 	productSvc := service.NewPOSProductService(productRepo)
-	orderSvc := service.NewOrderService(orderRepo, productRepo, invClient)
+	orderSvc := service.NewOrderService(orderRepo, productRepo, vatConfigRepo, invClient)
 	syncSvc := service.NewStockSyncService(stockRepo, invClient)
 	alertSvc := service.NewPayLaterAlertService(orderRepo)
 	reportSvc := service.NewReportService(reportRepo)
+	vatConfigSvc := service.NewVatConfigService(vatConfigRepo)
 
 	// Initial stock sync on startup
 	go func() {
@@ -73,6 +75,7 @@ func main() {
 		Webhook: handler.NewWebhookHandler(syncSvc),
 		BankQR:  handler.NewBankQRHandler(bankQRRepo),
 		Report:  handler.NewReportHandler(reportSvc),
+		Vat:     handler.NewVatConfigHandler(vatConfigSvc),
 	}
 
 	app := fiber.New(fiber.Config{

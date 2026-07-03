@@ -35,6 +35,8 @@ var messages = map[string]map[string]string{
 	// Config
 	"config.bank_qr_get":     {EN: "bank QR config retrieved", TH: "ดึงข้อมูลการตั้งค่า QR สำเร็จ"},
 	"config.bank_qr_updated": {EN: "bank QR config updated", TH: "อัปเดตการตั้งค่า QR สำเร็จ"},
+	"config.vat_get":         {EN: "vat config retrieved", TH: "ดึงข้อมูลการตั้งค่า VAT สำเร็จ"},
+	"config.vat_updated":     {EN: "vat config updated", TH: "อัปเดตการตั้งค่า VAT สำเร็จ"},
 
 	// Reports
 	"report.summary":          {EN: "report summary", TH: "สรุปรายงาน"},
@@ -87,6 +89,9 @@ var messages = map[string]map[string]string{
 	"only PAY_LATER orders can be marked as paid":                 {EN: "only PAY_LATER orders can be marked as paid", TH: "บันทึกการชำระเงินได้เฉพาะออเดอร์ประเภท PAY_LATER เท่านั้น"},
 	"order is already paid":                                       {EN: "order is already paid", TH: "ออเดอร์นี้ชำระเงินแล้ว"},
 	"only COMPLETED orders can be marked as paid":                 {EN: "only COMPLETED orders can be marked as paid", TH: "บันทึกการชำระเงินได้เฉพาะออเดอร์ที่สำเร็จแล้วเท่านั้น"},
+
+	// VAT config error strings
+	"vat rate must be between 0 and 100": {EN: "vat rate must be between 0 and 100", TH: "อัตรา VAT ต้องอยู่ระหว่าง 0 ถึง 100"},
 }
 
 // T returns the translated message for the given language, falling back to EN, then the key itself.

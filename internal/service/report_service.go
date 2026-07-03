@@ -21,6 +21,7 @@ type SummaryReport struct {
 	TotalRevenue  float64                          `json:"total_revenue"`
 	TotalCost     float64                          `json:"total_cost"`
 	GrossProfit   float64                          `json:"gross_profit"`
+	TotalVat      float64                          `json:"total_vat"`
 	OrderCount    int64                            `json:"order_count"`
 	AvgOrderValue float64                          `json:"avg_order_value"`
 	ByStatus      []repository.StatusCount        `json:"by_status"`
@@ -28,7 +29,7 @@ type SummaryReport struct {
 }
 
 func (s *ReportService) GetSummary(from, to time.Time) (*SummaryReport, error) {
-	revenue, cost, count, err := s.repo.GetCompletedRevenueSummary(from, to)
+	revenue, cost, vat, count, err := s.repo.GetCompletedRevenueSummary(from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,7 @@ func (s *ReportService) GetSummary(from, to time.Time) (*SummaryReport, error) {
 		TotalRevenue:  revenue,
 		TotalCost:     cost,
 		GrossProfit:   revenue - cost,
+		TotalVat:      vat,
 		OrderCount:    count,
 		AvgOrderValue: avg,
 		ByStatus:      byStatus,

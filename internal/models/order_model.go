@@ -37,6 +37,12 @@ type Order struct {
 	// derived (TotalAmount - TotalCost), computed at read time, never persisted.
 	TotalCost     float64       `gorm:"default:0" json:"total_cost,omitempty"`
 	Profit        float64       `gorm:"-" json:"profit,omitempty"`
+	// VAT breakdown, snapshotted from VatConfig at order time. NetAmount is
+	// TotalAmount minus VatAmount (the pre-tax price). Visible to all roles —
+	// this is standard receipt data, not sensitive like cost/profit.
+	VatRate       float64       `gorm:"default:0" json:"vat_rate,omitempty"`
+	VatAmount     float64       `gorm:"default:0" json:"vat_amount,omitempty"`
+	NetAmount     float64       `gorm:"default:0" json:"net_amount,omitempty"`
 	Notes         string        `json:"notes"`
 	FailReason    string        `json:"fail_reason,omitempty"`
 	Items         []OrderItem   `gorm:"foreignKey:OrderID" json:"items,omitempty"`

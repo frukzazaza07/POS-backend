@@ -17,21 +17,42 @@ func validationErr(msg string) error          { return &ValidationError{msg: msg
 func validationErrf(f string, a ...any) error { return &ValidationError{msg: fmt.Sprintf(f, a...)} }
 
 type OrderService struct {
-	orderRepo   *repository.OrderRepository
-	productRepo *repository.POSProductRepository
-	invClient   *InventoryClient
+	orderRepo     *repository.OrderRepository
+	productRepo   *repository.POSProductRepository
+	vatConfigRepo *repository.VatConfigRepository
+	invClient     *InventoryClient
 }
 
 func NewOrderService(
 	orderRepo *repository.OrderRepository,
 	productRepo *repository.POSProductRepository,
+	vatConfigRepo *repository.VatConfigRepository,
 	invClient *InventoryClient,
 ) *OrderService {
 	return &OrderService{
-		orderRepo:   orderRepo,
-		productRepo: productRepo,
-		invClient:   invClient,
+		orderRepo:     orderRepo,
+		productRepo:   productRepo,
+		vatConfigRepo: vatConfigRepo,
+		invClient:     invClient,
 	}
+}
+
+// calcVat derives the VAT breakdown for a given (already-computed) order
+// total, per the current VatConfig. Returns the possibly-adjusted total
+// (grows when VAT is added on top of exclusive pricing), plus rate/vat/net.
+func calcVat(vat *models.VatConfig, totalAmount float64) (newTotal, rate, vatAmount, netAmount float64) {
+	if vat == nil || !vat.Enabled {
+		return totalAmount, 0, 0, totalAmount
+	}
+	rate = vat.Rate
+	if vat.PriceIncludesVat {
+		vatAmount = totalAmount * rate / (100 + rate)
+		netAmount = totalAmount - vatAmount
+		return totalAmount, rate, vatAmount, netAmount
+	}
+	netAmount = totalAmount
+	vatAmount = totalAmount * rate / 100
+	return netAmount + vatAmount, rate, vatAmount, netAmount
 }
 
 type OrderItemRequest struct {
@@ -97,13 +118,22 @@ func (s *OrderService) CreateOrder(cashierID string, req CreateOrderRequest) (*m
 		})
 	}
 
+	vatConfig, err := s.vatConfigRepo.Get()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load vat config: %w", err)
+	}
+	adjustedTotal, vatRate, vatAmount, netAmount := calcVat(vatConfig, totalAmount)
+
 	posOrderID := models.GeneratePosOrderID()
 	order := &models.Order{
 		PosOrderID:    posOrderID,
 		CashierID:     cashierID,
 		Status:        models.OrderStatusPending,
-		TotalAmount:   totalAmount,
+		TotalAmount:   adjustedTotal,
 		TotalCost:     totalCost,
+		VatRate:       vatRate,
+		VatAmount:     vatAmount,
+		NetAmount:     netAmount,
 		Notes:         req.Notes,
 		Items:         orderItems,
 		PaymentMethod: paymentMethod,

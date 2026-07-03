@@ -17,6 +17,7 @@ func Migrate(db *gorm.DB) error {
 		&models.OrderItem{},
 		&models.StockCache{},
 		&models.BankQRConfig{},
+		&models.VatConfig{},
 	)
 }
 

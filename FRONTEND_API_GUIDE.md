@@ -33,12 +33,13 @@ Every response uses this wrapper:
 5. [Products](#5-products)
 6. [Orders & Payment Methods](#6-orders--payment-methods)
 7. [Bank QR Config](#7-bank-qr-config)
-8. [Pay Later Management](#8-pay-later-management)
-9. [Stock](#9-stock)
-10. [Reports](#10-reports)
-11. [Role-Based Access](#11-role-based-access)
-12. [Error Handling](#12-error-handling)
-13. [Quick Reference](#13-quick-reference)
+8. [VAT Config](#8-vat-config)
+9. [Pay Later Management](#9-pay-later-management)
+10. [Stock](#10-stock)
+11. [Reports](#11-reports)
+12. [Role-Based Access](#12-role-based-access)
+13. [Error Handling](#13-error-handling)
+14. [Quick Reference](#14-quick-reference)
 
 ---
 
@@ -94,6 +95,9 @@ export interface Order {
   total_amount: number;
   total_cost?: number; // admin only
   profit?: number;     // admin only — total_amount - total_cost
+  vat_rate?: number;    // 0 if VAT disabled — visible to all roles
+  vat_amount?: number;
+  net_amount?: number;  // total_amount - vat_amount (pre-tax price)
   payment_method: PaymentMethod;
   notes: string;
   fail_reason?: string;
@@ -115,6 +119,13 @@ export interface BankQRConfig {
   account_number: string;
   qr_image_url: string;
   is_active: boolean;
+}
+
+export interface VatConfig {
+  id: string;
+  enabled: boolean;
+  rate: number;               // percent, e.g. 7 for 7%
+  price_includes_vat: boolean; // true = product prices already include VAT
 }
 
 export interface StockItem {
@@ -802,7 +813,81 @@ export default function BankQRConfigPage() {
 
 ---
 
-## 8. Pay Later Management
+## 8. VAT Config
+
+Global, singleton config for how VAT is applied to orders. Everyone (admin or
+cashier) can read it — a cashier-facing receipt screen needs `vat_rate` to
+render the tax line. Only admin can change it.
+
+### Get Current Config
+```
+GET /api/v1/config/vat
+```
+Always returns `200` — if nothing has been configured yet, it returns sane
+defaults (`enabled: false, rate: 7, price_includes_vat: true`) rather than
+`404`, since order creation must work even before VAT is set up.
+
+**Response `data`:**
+```json
+{ "id": "uuid", "enabled": true, "rate": 7, "price_includes_vat": true }
+```
+
+### Set / Update Config *(admin only)*
+```
+PUT /api/v1/config/vat
+```
+```json
+{ "enabled": true, "rate": 7, "price_includes_vat": true }
+```
+- `rate` — percent, must be between `0` and `100`
+- `price_includes_vat`:
+  - `true` (typical Thai retail) — product `price` already includes VAT.
+    `total_amount` on the order stays the same; `vat_amount` is backed out of it.
+  - `false` — product `price` is pre-tax. VAT is added on top, so
+    `total_amount` on the order will be **higher** than the sum of item prices.
+
+### Effect on orders
+
+Every order created while VAT is enabled gets a snapshot of the rate at that
+time, stored on the `Order`:
+
+| Field | Meaning |
+|---|---|
+| `vat_rate` | Rate applied to this order (0 if VAT was disabled) |
+| `vat_amount` | Tax portion of `total_amount` |
+| `net_amount` | `total_amount - vat_amount` — the pre-tax price |
+
+```ts
+// src/services/config.ts (add)
+import type { VatConfig } from '../types/api';
+
+export const getVatConfig = (): Promise<VatConfig> =>
+  api.get<ApiResponse<VatConfig>>('/api/v1/config/vat').then(r => r.data.data!);
+
+export const setVatConfig = (body: Omit<VatConfig, 'id'>): Promise<VatConfig> =>
+  api.put<ApiResponse<VatConfig>>('/api/v1/config/vat', body).then(r => r.data.data!);
+```
+
+**Receipt VAT line:**
+```tsx
+function ReceiptTotals({ order }: { order: Order }) {
+  return (
+    <div>
+      {order.vat_amount ? (
+        <>
+          <p>Subtotal (excl. VAT): ฿{order.net_amount!.toFixed(2)}</p>
+          <p>VAT ({order.vat_rate}%): ฿{order.vat_amount.toFixed(2)}</p>
+        </>
+      ) : null}
+      <p><strong>Total: ฿{order.total_amount.toFixed(2)}</strong></p>
+    </div>
+  );
+}
+```
+
+---
+
+## 9. Pay Later Management
 
 ### How it works
 
@@ -899,7 +984,7 @@ Connect this to LINE Notify, Discord webhook, or any HTTP endpoint.
 
 ---
 
-## 9. Stock
+## 10. Stock
 
 ### Get Cached Stock (fast)
 ```
@@ -932,7 +1017,7 @@ export const syncStock = () =>
 
 ---
 
-## 10. Reports
+## 11. Reports
 
 All report endpoints require **admin JWT**. All accept `?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: last 30 days). Revenue counts only `COMPLETED` orders.
 
@@ -968,6 +1053,7 @@ export type SummaryReport = {
   total_revenue: number;
   total_cost: number;
   gross_profit: number;
+  total_vat: number;
   order_count: number;
   avg_order_value: number;
   by_status: Array<{ status: OrderStatus; count: number; total_amount: number }>;
@@ -994,6 +1080,7 @@ GET /api/v1/reports/summary?from=2026-06-01&to=2026-06-30
   "total_revenue": 48500.00,
   "total_cost": 16200.00,
   "gross_profit": 32300.00,
+  "total_vat": 3172.90,
   "order_count": 312,
   "avg_order_value": 155.45,
   "by_status": [
@@ -1107,7 +1194,7 @@ export const getOverduePayLater = (): Promise<Order[]> =>
 
 ---
 
-## 11. Role-Based Access
+## 12. Role-Based Access
 
 ```ts
 export const isAdmin = () => getCurrentUser()?.role === 'admin';
@@ -1121,7 +1208,7 @@ export const isAdmin = () => getCurrentUser()?.role === 'admin';
 
 ---
 
-## 12. Error Handling
+## 13. Error Handling
 
 ```ts
 // src/lib/errors.ts
@@ -1145,7 +1232,7 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 
 ---
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 ### All Endpoints
 
@@ -1168,6 +1255,8 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 | `GET` | `/api/v1/config/bank-qr/qrcode?amount=N` | JWT | any |
 | `GET` | `/api/v1/config/bank-qr` | JWT | any |
 | `PUT` | `/api/v1/config/bank-qr` | JWT | admin |
+| `GET` | `/api/v1/config/vat` | JWT | any |
+| `PUT` | `/api/v1/config/vat` | JWT | admin |
 | `GET` | `/api/v1/stock` | JWT | any |
 | `POST` | `/api/v1/stock/sync` | JWT | admin |
 | `GET` | `/api/v1/stock/availability/:id?quantity=N` | JWT | any |

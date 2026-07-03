@@ -15,6 +15,7 @@ type Handlers struct {
 	Webhook *handler.WebhookHandler
 	BankQR  *handler.BankQRHandler
 	Report  *handler.ReportHandler
+	Vat     *handler.VatConfigHandler
 }
 
 func Setup(app *fiber.App, h Handlers) {
@@ -70,4 +71,6 @@ func Setup(app *fiber.App, h Handlers) {
 	config.Get("/bank-qr/qrcode", h.BankQR.GetQRCode) // before /bank-qr to avoid prefix clash
 	config.Get("/bank-qr", h.BankQR.Get)
 	config.Put("/bank-qr", middleware.AdminOnly(), h.BankQR.Upsert)
+	config.Get("/vat", h.Vat.Get)
+	config.Put("/vat", middleware.AdminOnly(), h.Vat.Upsert)
 }
