@@ -134,6 +134,8 @@ Orders support three payment methods:
 
 ```env
 APP_PORT=4000
+# Optional: single connection string, takes priority over DB_* vars below
+DATABASE_URL=postgres://postgres:password@localhost:5432/pos_db?sslmode=disable
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
