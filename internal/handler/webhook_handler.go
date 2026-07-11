@@ -45,7 +45,7 @@ func (h *WebhookHandler) InventoryEvent(c *fiber.Ctx) error {
 	rawBody := c.Body()
 	sig := c.Get("X-Inventory-Signature")
 	event := c.Get("X-Inventory-Event")
-
+	log.Printf("webhook: received event=%s", event)
 	secret := os.Getenv("INVENTORY_WEBHOOK_SECRET")
 	if secret != "" && sig != "" {
 		if !verifySignature(rawBody, sig, secret) {
@@ -57,8 +57,6 @@ func (h *WebhookHandler) InventoryEvent(c *fiber.Ctx) error {
 	if err := json.Unmarshal(rawBody, &payload); err != nil {
 		return response.Error(c, fiber.StatusBadRequest, "invalid payload")
 	}
-
-	log.Printf("webhook: received event=%s", event)
 
 	switch payload.Event {
 	case "STOCK_UPDATED", "STOCK_LOW", "STOCK_OUT":

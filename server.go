@@ -95,7 +95,10 @@ func main() {
 
 	router.Setup(app, handlers)
 
-	port := os.Getenv("APP_PORT")
+	port := os.Getenv("PORT") // Vercel ใส่ให้
+	if port == "" {
+		port = os.Getenv("APP_PORT") // ของคุณตอนรัน local
+	}
 	if port == "" {
 		port = "4000"
 	}
@@ -105,7 +108,7 @@ func main() {
 
 	if certFile != "" && keyFile != "" {
 		log.Printf("POS Backend running on https://localhost:%s", port)
-		log.Fatal(app.ListenTLS(":"+port, certFile, keyFile))
+		// log.Fatal(app.ListenTLS(":"+port, certFile, keyFile))
 	} else {
 		log.Printf("POS Backend running on http://localhost:%s", port)
 		log.Fatal(app.Listen(":" + port))
